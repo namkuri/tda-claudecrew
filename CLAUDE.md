@@ -112,6 +112,13 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **restore_agents 폴백 라벨 제거**: `.cc-state.json` 없는 마이그레이션 케이스에서 "(이전 작업 — 복원됨)" placeholder → branch명 그대로(솔직).
   - **데모 모드 가시성**: 데스크톱 빌드에서는 `window.__TAURI__` 가드로 절대 미실행. 데모 mock의 `read_usage`도 `available: false`로 명시(데스크톱과 헷갈리지 않도록). 데모 진입 시 콘솔에 `[ClaudeCrew] Demo mode` 경고.
   - **.gitattributes**: `.sh` 파일 LF 강제(Windows에서 푸시해도 Unix에서 깨지지 않음).
+- **전문가용 신뢰도(v0.9) — 검증·격리·정직성 강화**:
+  - **F1 자동 검증 게이트**: `verify_changes` 커맨드가 worktree에서 프로젝트 종류(Node/Rust/Python/Go)를 감지해 빌드/테스트를 실행. UI '🧪 자동 검증' 버튼 + 결과 패널(단계별 ✓/✗ + stderr 마지막 3줄). 검증 실패면 '적용' 버튼에 ⚠ 표시(강제 적용은 가능하되 가시화).
+  - **F2 프로젝트 컨텍스트 주입**: `build_context_prompt`가 원본 저장소의 `CLAUDE.md`/`AGENTS.md`/`README.md`(최대 24KB)를 읽어 첫 호출에 `--append-system-prompt`로 첨부 → 격리된 worktree에서도 AI가 프로젝트 컨벤션을 안다. 후속 메시지는 세션 컨텍스트에 누적되므로 첨부 안 함.
+  - **F3 다중 에이전트 강제**: 팀 모드 프롬프트를 "권장"에서 "⚠ 반드시 Task 도구로 위임" 명령형으로. 자동 모드 프롬프트도 병렬 위임 가이드 유지.
+  - **F4 훅 범위 분리(기본 안전)**: `setup_environment(repo, hook_scope)` — 기본 `"project"`는 훅을 **`<repo>/.claude/settings.json`** 에만 등록 → 사용자의 다른 Claude Code 세션을 안 건드림. 옵션 `"global"`(전체)·`"none"`(끄기). 기존 전역 항목은 자동 정리.
+  - **F7 에러 가시성**: stream-json `result` 이벤트의 `is_error`/`subtype=error_*` 감지 → "❌ 오류: …" + 한도/인증/네트워크 힌트 자동 분기 표시.
+  - **F8 Task 실패 시각화**: 서브에이전트 `tool_result.is_error` → 미니 콘솔 빨간 테두리·✗ 라벨 + 에러 메시지 표시(이전에는 무조건 ✓ done이었음 → 거짓 성공).
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.

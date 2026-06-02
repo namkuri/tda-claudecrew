@@ -72,6 +72,9 @@ const I18N = {
     noSession: "이 작업은 아직 세션이 시작되지 않아 후속 대화를 보낼 수 없어요.",
     talkingTo: "대화 상대", role_orchestrator: "오케스트레이터", role_team: "팀장(병렬 위임)",
     wtPath: "작업 공간(worktree)", wtOpen: "📁 폴더 열기", wtTitle: "Git worktree — 원본 폴더와 격리된 별도 작업 공간",
+    verify: "🧪 자동 검증", verifying: "검증 중…", verifyPass: "검증 통과", verifyFail: "검증 실패",
+    verifySkipped: "감지된 빌드 시스템 없음(검증 생략)", verifyFailedTip: "검증 실패 — 그래도 적용하시려면 다시 누르세요.",
+    sub_failed: "서브에이전트 실패",
     tokenSrc: "토큰", tokenSub: "구독 플랜", tokenApi: "API 키", tokenTitle: "어떤 토큰으로 청구할지 — 구독(앱 플랜) 또는 API 키",
     composerHint: "무엇을 원하는지 적기만 하면, 알아서 전문가와 스킬을 골라 처리해요. (아래 템플릿은 선택)",
     quickTpl: "빠른 템플릿 (선택)",
@@ -138,6 +141,9 @@ const I18N = {
     noSession: "No session yet — this task hasn't produced its first response, so follow-up isn't possible.",
     talkingTo: "Talking to", role_orchestrator: "Orchestrator", role_team: "Lead (parallel delegate)",
     wtPath: "Workspace (worktree)", wtOpen: "📁 Open folder", wtTitle: "Git worktree — an isolated working tree separate from your main folder",
+    verify: "🧪 Auto-verify", verifying: "Verifying…", verifyPass: "Verified", verifyFail: "Verification failed",
+    verifySkipped: "No detected build system (skipped)", verifyFailedTip: "Verification failed — press Apply again to override.",
+    sub_failed: "Sub-agent failed",
     tokenSrc: "Tokens", tokenSub: "Subscription", tokenApi: "API key", tokenTitle: "Which tokens to bill — your subscription (app plan) or an API key",
     composerHint: "Just write what you want — it picks the right experts and skills for you. (Templates below are optional.)",
     quickTpl: "Quick templates (optional)",
@@ -207,6 +213,10 @@ function makeDemoApi(){
                                 return Promise.resolve({ available:false, today_tokens:0, week_tokens:0, today_messages:0, week_messages:0, total_messages:0, total_sessions:0, models:[] });
       case "open_path":         console.log("[demo] open_path", args.path); return Promise.resolve();
       case "get_base_branch":   return Promise.resolve("main");
+      case "verify_changes":    return Promise.resolve({ ran:true, success:true, note:"감지됨: Node", steps:[
+        { name:"npm", command:"npm run build", success:true, stdout:"built", stderr:"" },
+        { name:"npm", command:"npm test", success:true, stdout:"3 passed", stderr:"" },
+      ]});
       case "send_message": {
         const cur = agents[args.id]; if (!cur) return Promise.resolve();
         emit("agent_output", { id: args.id, text: "\n💬 사용자: " + args.prompt });
@@ -304,7 +314,8 @@ $("#btnFolder").addEventListener("click", async () => {
 $("#btnSetup").addEventListener("click", async () => {
   $("#setupStatus").textContent = t("installing"); $("#setupStatus").className = "status";
   try {
-    const msg = await invoke("setup_environment");
+    // 기본 hook_scope='project' — 사용자의 다른 Claude Code 세션을 방해하지 않음.
+    const msg = await invoke("setup_environment", { repo: repoPath || null, hookScope: "project" });
     setupOk = true; localStorage.setItem("cc_setup", "1");
     $("#setupStatus").textContent = msg; $("#setupStatus").className = "status ok";
   } catch (e) {
@@ -599,7 +610,7 @@ function renderStatusbar(){
      <span class="sb-seg sb-ctx">${t("sbCtx")}: <b>${fmtTok(ctx)}</b> / ${fmtTok(CTX_WINDOW)} (${pct}%) <span class="ctxbar"><i class="${ctxCls}" style="width:${pct}%"></i></span><span class="sb-src" title="${esc(t("sbSrcTitle"))}">${src}</span></span>`;
 }
 
-// 팀원 데이터 정규화: {status} 문자열 또는 {status,desc,result} 객체 모두 허용
+// 팀원 데이터 정규화: {status} 문자열 또는 {status,desc,result,isError} 객체 모두 허용
 function mate(tm, name){ const v = tm[name]; return typeof v === "string" ? { status: v } : (v || {}); }
 
 // 오케스트레이터 → 전문가 호출관계 바
@@ -612,16 +623,39 @@ function renderOrchBar(a){
   return `<div class="orch-bar"><span class="orch-lead">🧠 ${t("orchestrator")}</span><span class="orch-to">→</span>${chips}</div>`;
 }
 
+// 자동 검증 결과 패널 (F1)
+function renderVerifyPanel(a){
+  const v = a._verify; if (!v) return "";
+  const head = v.ran
+    ? (v.success ? `<span class="vf-ok">✓ ${t("verifyPass")}</span>` : `<span class="vf-bad">✗ ${t("verifyFail")}</span>`)
+    : `<span class="vf-skip">⊘ ${t("verifySkipped")}</span>`;
+  const steps = (v.steps || []).map(s => {
+    const tail = (s.stderr || s.stdout || "").trim().split("\n").slice(-3).join("\n");
+    return `<div class="vf-step ${s.success ? "ok" : "bad"}">
+      <div class="vf-cmd">${s.success ? "✓" : "✗"} <code>${esc(s.command)}</code></div>
+      ${tail ? `<pre class="vf-out">${esc(tail.slice(-600))}</pre>` : ""}
+    </div>`;
+  }).join("");
+  return `<div class="verify-panel">
+    <div class="vf-head">${head} <span class="vf-note">${esc(v.note || "")}</span></div>
+    ${steps}
+  </div>`;
+}
+
 // 서브에이전트 미니 콘솔(CMD 창) 그리드
 function renderSubConsoles(a){
   const tm = a.teammates; if (!tm || !Object.keys(tm).length) return "";
   const cards = Object.keys(tm).map(name => {
     const m = mate(tm, name);
-    const body = m.status === "done"
-      ? (m.result ? esc(m.result) : "✓ " + t("sub_done"))
-      : (m.desc ? esc(m.desc) : t("sub_working"));
-    return `<div class="console sub ${m.status}">
-      <div class="con-head"><span class="con-dot ${m.status}"></span>${esc(name)}<span class="con-st">${m.status === "done" ? "✓ done" : "● working"}</span></div>
+    const cls = m.isError ? "error" : m.status;
+    const headIcon = m.isError ? "✗ error" : (m.status === "done" ? "✓ done" : "● working");
+    const body = m.isError
+      ? `<span style="color:var(--err)">❌ ${esc(m.result || t("sub_failed"))}</span>`
+      : (m.status === "done"
+          ? (m.result ? esc(m.result) : "✓ " + t("sub_done"))
+          : (m.desc ? esc(m.desc) : t("sub_working")));
+    return `<div class="console sub ${cls}">
+      <div class="con-head"><span class="con-dot ${cls}"></span>${esc(name)}<span class="con-st">${headIcon}</span></div>
       <div class="con-body">${body}</div>
     </div>`;
   }).join("");
@@ -785,9 +819,11 @@ function renderAgentView(a){
        <textarea id="followUp-${a.id}" rows="2" placeholder="${esc(t("followPh"))}" ${a.status === "running" || a.status === "creating" ? "disabled" : ""}></textarea>
        <button class="btn go" data-act="send" ${a.status === "running" || a.status === "creating" || !a.session_id ? "disabled" : ""} title="${a.session_id ? "" : esc(t("noSession"))}">${t("followSend")}</button>
      </div>
+     ${renderVerifyPanel(a)}
      <div class="av-acts">
        ${a.port ? `<button data-act="preview" class="primary">${t("preview", a.port)}</button>` : ""}
-       <button data-act="apply" class="primary">${t("avApply")}</button>
+       <button data-act="verify">${a._verifying ? t("verifying") : t("verify")}</button>
+       <button data-act="apply" class="primary"${a._verify && !a._verify.success && a._verify.ran ? ` title="${esc(t("verifyFailedTip"))}"` : ""}>${t("avApply")}${a._verify && !a._verify.success && a._verify.ran ? " ⚠" : ""}</button>
        <button data-act="diff">${t("avDiff")}</button>
        <button data-act="stop">${t("avStop")}</button>
        <button data-act="cleanup">${t("avRevert")}</button>
@@ -797,6 +833,13 @@ function renderAgentView(a){
   av.querySelector('[data-act="diff"]').onclick = () => viewDiff(a.id);
   av.querySelector('[data-act="stop"]').onclick = () => invoke("stop_agent", { id: a.id });
   av.querySelector('[data-act="cleanup"]').onclick = () => { if (confirm(t("cleanupConfirm"))) invoke("cleanup_agent", { id: a.id }); };
+  const verifyBtn = av.querySelector('[data-act="verify"]');
+  if (verifyBtn) verifyBtn.onclick = async () => {
+    a._verifying = true; renderStage();
+    try { a._verify = await invoke("verify_changes", { id: a.id }); }
+    catch (e) { a._verify = { ran:false, success:false, steps:[], note: String(e) }; }
+    a._verifying = false; renderStage();
+  };
   const pv = av.querySelector('[data-act="preview"]'); if (pv) pv.onclick = () => invoke("open_url", { url: "http://localhost:" + a.port });
   // 후속 메시지 보내기 — Enter(Shift+Enter는 줄바꿈), 또는 버튼
   const ta = av.querySelector("#followUp-" + a.id);
@@ -955,12 +998,12 @@ listen("agent_removed", (ev) => {
   render();
 });
 listen("teammate_update", (ev) => {
-  const { agentId, name, status, desc, result } = ev.payload || {};
+  const { agentId, name, status, desc, result, isError } = ev.payload || {};
   const a = state.get(agentId); if (!a) return;
   a.teammates = a.teammates || {};
   const prev = mate(a.teammates, name);
-  a.teammates[name] = { status, desc: desc || prev.desc || "", result: result || prev.result || "" };
-  // 보고 있는 작업이면 서브 콘솔만 갱신(메인 터미널 스크롤 보존)
+  a.teammates[name] = { status, desc: desc || prev.desc || "", result: result || prev.result || "",
+                        isError: !!isError || !!prev.isError };
   if (agentId === selectedId) renderStage(); else renderSidebar();
 });
 listen("cost_capped", (ev) => {

@@ -157,35 +157,72 @@ fn check_claude() -> Result<String, String> {
 }
 
 // ---------------- 커맨드: 온보딩 환경 설정 ----------------
-// ~/.claude 에 전문가(서브에이전트) 설치 + 에이전트 팀 플래그 활성화
+// ~/.claude 에 전문가/스킬/커맨드 설치 + 훅(범위 선택) + 팀 플래그 활성화.
+//
+// hook_scope:
+//   "project"(기본·안전) — 훅은 ~/.claude/claudecrew-hooks/ 에 두되 매처(matcher) settings를
+//                          `<repo>/.claude/settings.json` 에만 등록 → 사용자의 다른 프로젝트엔 영향 X.
+//   "global" — 기존처럼 `~/.claude/settings.json` 에 등록 (모든 Claude Code 세션에 적용, 강력하지만 부작용 큼).
+//   "none"   — 훅 자체 설치 안 함.
 #[tauri::command]
-fn setup_environment() -> Result<String, String> {
+fn setup_environment(repo: Option<String>, hook_scope: Option<String>) -> Result<String, String> {
     let claude_dir = home_dir().join(".claude");
     let agents_dir = claude_dir.join("agents");
     std::fs::create_dir_all(&agents_dir).map_err(|e| e.to_string())?;
+    let scope = hook_scope.as_deref().unwrap_or("project");
 
-    // settings.json 병합 (팀 플래그)
-    let settings_path = claude_dir.join("settings.json");
-    let mut settings: Value = if settings_path.exists() {
-        let raw = std::fs::read_to_string(&settings_path).unwrap_or_else(|_| "{}".into());
-        serde_json::from_str(&raw).unwrap_or(Value::Object(Default::default()))
-    } else {
-        Value::Object(Default::default())
-    };
-    if !settings.is_object() {
-        settings = Value::Object(Default::default());
+    // ── 전역 settings.json: env(팀 플래그)만 항상 — 훅은 scope에 따라 분기
+    let global_settings_path = claude_dir.join("settings.json");
+    let mut g: Value = if global_settings_path.exists() {
+        serde_json::from_str(&std::fs::read_to_string(&global_settings_path).unwrap_or_else(|_| "{}".into()))
+            .unwrap_or(Value::Object(Default::default()))
+    } else { Value::Object(Default::default()) };
+    if !g.is_object() { g = Value::Object(Default::default()); }
+    if !g.get("env").map(|v| v.is_object()).unwrap_or(false) {
+        g["env"] = Value::Object(Default::default());
     }
-    if !settings.get("env").map(|v| v.is_object()).unwrap_or(false) {
-        settings["env"] = Value::Object(Default::default());
-    }
-    settings["env"]["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = Value::String("1".into());
+    g["env"]["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = Value::String("1".into());
 
-    // 훅 설치 + settings.hooks 병합
-    install_hooks(&claude_dir, &mut settings)?;
+    // 기존 전역 훅 항목이 있으면 'project' 또는 'none' 선택 시 정리(드리프트 방지)
+    if scope != "global" {
+        if let Some(hooks) = g.get_mut("hooks").and_then(|v| v.as_object_mut()) {
+            for arr in hooks.values_mut() {
+                if let Some(list) = arr.as_array_mut() {
+                    list.retain(|grp| !grp.get("hooks").and_then(|h| h.as_array())
+                        .map(|hs| hs.iter().any(|hk| hk.get("command").and_then(|c| c.as_str())
+                            .map(|c| c.contains("claudecrew-hooks")).unwrap_or(false))).unwrap_or(false));
+                }
+            }
+        }
+    }
+
+    // 훅 설치(스크립트 파일은 항상 ~/.claude/claudecrew-hooks/ 에) + 등록 위치 선택
+    match scope {
+        "none" => { /* 스크립트도 안 둔다 */ }
+        "global" => { install_hooks(&claude_dir, &mut g)?; }
+        _ /* project */ => {
+            // 스크립트 파일은 두되, 등록은 프로젝트 settings.json 에
+            install_hooks_scripts_only(&claude_dir)?;
+            if let Some(r) = repo.as_deref() {
+                let proj = PathBuf::from(r).join(".claude");
+                std::fs::create_dir_all(&proj).map_err(|e| e.to_string())?;
+                let proj_settings = proj.join("settings.json");
+                let mut p: Value = if proj_settings.exists() {
+                    serde_json::from_str(&std::fs::read_to_string(&proj_settings).unwrap_or_else(|_| "{}".into()))
+                        .unwrap_or(Value::Object(Default::default()))
+                } else { Value::Object(Default::default()) };
+                if !p.is_object() { p = Value::Object(Default::default()); }
+                register_hooks_in(&claude_dir, &mut p);
+                std::fs::write(&proj_settings,
+                    serde_json::to_string_pretty(&p).map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+    }
 
     std::fs::write(
-        &settings_path,
-        serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?,
+        &global_settings_path,
+        serde_json::to_string_pretty(&g).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
 
@@ -275,9 +312,14 @@ fn setup_environment() -> Result<String, String> {
 // ~/.claude/claudecrew-hooks 에 OS별 훅 스크립트(두 벌)를 기록하고,
 // 현재 OS용 절대경로를 settings.hooks 에 idempotent 하게 병합한다.
 // exit code 규칙: 0=진행, 2=차단/계속.
-fn install_hooks(claude_dir: &std::path::Path, settings: &mut Value) -> Result<(), String> {
+// 훅 스크립트 파일만 기록(설치 위치에 등록은 별도 함수에서).
+fn install_hooks_scripts_only(claude_dir: &std::path::Path) -> Result<(), String> {
     let hooks_dir = claude_dir.join("claudecrew-hooks");
     std::fs::create_dir_all(&hooks_dir).map_err(|e| e.to_string())?;
+    write_hook_scripts(&hooks_dir)
+}
+
+fn write_hook_scripts(hooks_dir: &std::path::Path) -> Result<(), String> {
 
     // Windows PowerShell + Unix bash 두 벌을 모두 기록(부록 A: OS 분기)
     let ps_scripts: [(&str, &str); 6] = [
@@ -312,59 +354,35 @@ fn install_hooks(claude_dir: &std::path::Path, settings: &mut Value) -> Result<(
         }
     }
 
-    // 현재 OS용 훅 실행 명령(절대경로)
+    Ok(())
+}
+
+// 훅 settings 등록(스코프 settings.json에 ClaudeCrew 훅 매처 idempotent 병합).
+fn register_hooks_in(claude_dir: &std::path::Path, settings: &mut Value) {
+    let hooks_dir = claude_dir.join("claudecrew-hooks");
     let script_cmd = |stem: &str| -> String {
         let ext = if cfg!(windows) { "ps1" } else { "sh" };
-        let p = hooks_dir.join(format!("{stem}.{ext}"));
-        let p = p.to_string_lossy().to_string();
-        if cfg!(windows) {
-            format!("powershell -NoProfile -ExecutionPolicy Bypass -File \"{p}\"")
-        } else {
-            format!("bash \"{p}\"")
-        }
+        let p = hooks_dir.join(format!("{stem}.{ext}")).to_string_lossy().to_string();
+        if cfg!(windows) { format!("powershell -NoProfile -ExecutionPolicy Bypass -File \"{p}\"") }
+        else { format!("bash \"{p}\"") }
     };
-
-    // settings.hooks 보장
     if !settings.get("hooks").map(|v| v.is_object()).unwrap_or(false) {
         settings["hooks"] = Value::Object(Default::default());
     }
-
-    // 이전 ClaudeCrew 항목(경로에 claudecrew-hooks 포함)을 지우고 새로 등록 → idempotent
     let marker = "claudecrew-hooks";
     let add_hook = |settings: &mut Value, event: &str, matcher: Option<&str>, command: String| {
-        let arr = settings["hooks"]
-            .as_object_mut()
-            .unwrap()
-            .entry(event.to_string())
-            .or_insert_with(|| Value::Array(vec![]));
-        if !arr.is_array() {
-            *arr = Value::Array(vec![]);
-        }
+        let arr = settings["hooks"].as_object_mut().unwrap()
+            .entry(event.to_string()).or_insert_with(|| Value::Array(vec![]));
+        if !arr.is_array() { *arr = Value::Array(vec![]); }
         let list = arr.as_array_mut().unwrap();
-        list.retain(|grp| {
-            !grp.get("hooks")
-                .and_then(|h| h.as_array())
-                .map(|hs| {
-                    hs.iter().any(|hk| {
-                        hk.get("command")
-                            .and_then(|c| c.as_str())
-                            .map(|c| c.contains(marker))
-                            .unwrap_or(false)
-                    })
-                })
-                .unwrap_or(false)
-        });
+        list.retain(|grp| !grp.get("hooks").and_then(|h| h.as_array())
+            .map(|hs| hs.iter().any(|hk| hk.get("command").and_then(|c| c.as_str())
+                .map(|c| c.contains(marker)).unwrap_or(false))).unwrap_or(false));
         let mut group = serde_json::Map::new();
-        if let Some(m) = matcher {
-            group.insert("matcher".into(), Value::String(m.into()));
-        }
-        group.insert(
-            "hooks".into(),
-            serde_json::json!([{ "type": "command", "command": command }]),
-        );
+        if let Some(m) = matcher { group.insert("matcher".into(), Value::String(m.into())); }
+        group.insert("hooks".into(), serde_json::json!([{ "type": "command", "command": command }]));
         list.push(Value::Object(group));
     };
-
     add_hook(settings, "PreToolUse", Some("Bash"), script_cmd("pretooluse-bash"));
     add_hook(settings, "PostToolUse", Some("Write|Edit"), script_cmd("posttooluse-format"));
     add_hook(settings, "Stop", None, script_cmd("stop-continue"));
@@ -372,7 +390,12 @@ fn install_hooks(claude_dir: &std::path::Path, settings: &mut Value) -> Result<(
     add_hook(settings, "TaskCompleted", None, script_cmd("taskcompleted-test"));
     add_hook(settings, "SessionStart", None, script_cmd("sessionstart-context"));
     add_hook(settings, "SubagentStop", None, script_cmd("subagentstop-log"));
+}
 
+// 전역(또는 인자로 받은) settings에 훅 스크립트+등록을 함께(과거 호환용).
+fn install_hooks(claude_dir: &std::path::Path, settings: &mut Value) -> Result<(), String> {
+    install_hooks_scripts_only(claude_dir)?;
+    register_hooks_in(claude_dir, settings);
     Ok(())
 }
 
@@ -441,9 +464,12 @@ fn create_agent(
     let effective_prompt = if team_on {
         format!(
             "{prompt}\n\n\
-— 위 요청을 작은 단위로 쪼개 적합한 전문가(서브에이전트: oracle 설계·근본원인, librarian 검색, \
-implementer 구현, debugger 디버깅, code-reviewer 검토, plan 계획, security 보안)에게 가능하면 병렬로 위임해 \
-끝까지 완수하고, 끝나면 누가 무엇을 했는지 한국어로 요약하세요."
+⚠️ 팀 모드 — 다음 규칙을 **반드시** 따르세요:\n\
+1) 직접 코드를 수정하지 말고, 일을 **반드시 Task 도구로 전문가(서브에이전트)에게 위임**하세요. \
+사용 가능한 전문가: oracle(설계·근본원인), librarian(검색·문서), implementer(구현), debugger(디버깅·재현), \
+code-reviewer(읽기전용 리뷰), plan(계획 형식화), security(읽기전용 보안).\n\
+2) 독립적인 조각은 **한 어시스턴트 턴에 여러 Task를 동시에 호출**해 병렬로 진행하세요.\n\
+3) 모든 Task 결과를 모아 검토한 뒤 마지막에 누가/무엇을/어떤 결과를 냈는지 한국어로 요약하세요."
         )
     } else {
         match agent.as_deref() {
@@ -479,6 +505,33 @@ fn set_status(app: &AppHandle, id: &str, status: &str) {
         let _ = app.emit("agent_update", a.clone());
         save_agent_state(a);
     }
+}
+
+// 원본 저장소의 컨텍스트 파일을 모아 system prompt 부록을 만든다.
+// worktree 안에는 변경된 파일만 있을 수 있고, CLAUDE.md/README가 누락될 수 있어
+// 원본 저장소에서 직접 읽어 모델에게 "이 프로젝트가 뭔지"를 알려준다.
+fn build_context_prompt(repo: &str) -> Option<String> {
+    let candidates = ["CLAUDE.md", "AGENTS.md", "README.md", "README"];
+    let mut parts: Vec<String> = Vec::new();
+    let mut budget = 24_000usize; // 시스템 프롬프트 과부하 방지(약 6k 토큰 정도)
+    for name in candidates {
+        let p = PathBuf::from(repo).join(name);
+        if !p.exists() { continue; }
+        if let Ok(text) = std::fs::read_to_string(&p) {
+            let take = text.chars().take(budget.min(8000)).collect::<String>();
+            if take.is_empty() { continue; }
+            budget = budget.saturating_sub(take.chars().count());
+            parts.push(format!("# {name}\n\n{take}"));
+            if budget == 0 { break; }
+        }
+    }
+    if parts.is_empty() { return None; }
+    Some(format!(
+        "[프로젝트 컨텍스트 — 이 저장소의 핵심 문서]\n\
+당신은 격리된 git worktree(`.agentboard/<branch>`)에서 작업 중입니다. 원본 저장소의 다음 문서를 \
+**규칙·컨벤션의 출처**로 우선 따르세요. 모순이 있으면 이 문서를 따릅니다.\n\n{}",
+        parts.join("\n\n---\n\n")
+    ))
 }
 
 // 작업 상태를 .agentboard/<branch>/.cc-state.json 에 저장한다 (재시작 후 복원용).
@@ -534,6 +587,12 @@ fn run_agent(
     ];
     if let Some(sid) = resume_sid.as_deref() {
         if !sid.is_empty() { args.push("--resume".into()); args.push(sid.into()); }
+    } else {
+        // 첫 호출에만 프로젝트 컨텍스트(CLAUDE.md/AGENTS.md/README) 시스템 프롬프트로 주입
+        if let Some(ctx) = build_context_prompt(&repo) {
+            args.push("--append-system-prompt".into());
+            args.push(ctx);
+        }
     }
     let mut cmd = claude_command(&args);
     cmd.current_dir(&worktree)
@@ -636,8 +695,20 @@ fn run_agent(
                             }
                             check_cost_cap(&app);
                         }
+                        // 에러 가시화: result 이벤트가 is_error 또는 subtype="error_*"면 친화 메시지로 표시
+                        let is_err = evt.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false)
+                            || evt.get("subtype").and_then(|v| v.as_str()).map(|s| s.starts_with("error")).unwrap_or(false);
                         if let Some(r) = evt.get("result").and_then(|v| v.as_str()) {
-                            emit_output(&app, &id, r);
+                            if is_err {
+                                let hint = if r.contains("rate") || r.contains("limit") || r.contains("quota") {
+                                    " (한도 도달 — '/usage' 또는 잠시 후 재시도)"
+                                } else if r.contains("auth") || r.contains("login") || r.contains("credential") {
+                                    " (인증 필요 — Claude Code 로그인 상태 확인)"
+                                } else { "" };
+                                emit_output(&app, &id, &format!("❌ 오류: {r}{hint}"));
+                            } else {
+                                emit_output(&app, &id, r);
+                            }
                         }
                     } else if let Some(t) = extract_text(&evt) {
                         emit_output(&app, &id, &t);
@@ -719,17 +790,22 @@ fn process_teammates(app: &AppHandle, agent_id: &str, evt: &Value, map: &mut Has
                     if b.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
                         if let Some(tuid) = b.get("tool_use_id").and_then(|v| v.as_str()) {
                             if let Some(name) = map.remove(tuid) {
-                                // 서브에이전트 결과 텍스트를 짧게 뽑아 함께 전달
                                 let result_text = b.get("content").map(|c| {
                                     if let Some(s) = c.as_str() { s.to_string() }
                                     else if let Some(arr) = c.as_array() {
                                         arr.iter().filter_map(|x| x.get("text").and_then(|t| t.as_str())).collect::<Vec<_>>().join(" ")
                                     } else { String::new() }
                                 }).unwrap_or_default();
+                                let is_error = b.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
                                 let snippet: String = result_text.chars().take(220).collect();
                                 let _ = app.emit(
                                     "teammate_update",
-                                    serde_json::json!({ "agentId": agent_id, "name": name, "desc": "", "result": snippet, "status": "done" }),
+                                    serde_json::json!({
+                                        "agentId": agent_id, "name": name, "desc": "",
+                                        "result": snippet,
+                                        "status": if is_error { "error" } else { "done" },
+                                        "isError": is_error
+                                    }),
                                 );
                             }
                         }
@@ -1057,6 +1133,112 @@ fn get_base_branch(app: AppHandle, id: String) -> Result<String, String> {
     Ok(detect_base_branch(&repo))
 }
 
+// ---------------- 커맨드: 자동 검증 게이트 ----------------
+// worktree에서 프로젝트 종류를 자동 감지해 빌드/테스트를 실행한다.
+// 결과를 UI에 돌려줘 사용자가 '적용' 전에 회귀 여부를 확인할 수 있게 한다.
+#[derive(Clone, Serialize, Default)]
+struct VerifyResult {
+    ran: bool,
+    success: bool,
+    steps: Vec<VerifyStep>,
+    note: String, // 감지된 프로젝트 종류 요약
+}
+#[derive(Clone, Serialize)]
+struct VerifyStep {
+    name: String,
+    command: String,
+    success: bool,
+    stdout: String,
+    stderr: String,
+}
+
+fn run_in(worktree: &str, program: &str, args: &[&str]) -> VerifyStep {
+    let mut cmd = if cfg!(windows) {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg(program);
+        for a in args { c.arg(a); }
+        c
+    } else {
+        let mut c = Command::new(program);
+        for a in args { c.arg(a); }
+        c
+    };
+    cmd.current_dir(worktree);
+    hide_window(&mut cmd);
+    let label = format!("{} {}", program, args.join(" "));
+    match cmd.output() {
+        Ok(out) => {
+            // 출력이 너무 길면 잘라낸다(UI 부담 방지)
+            let cut = |s: &[u8]| -> String {
+                let raw = String::from_utf8_lossy(s).to_string();
+                if raw.len() > 8000 { format!("…(앞 자름)\n{}", &raw[raw.len()-8000..]) } else { raw }
+            };
+            VerifyStep {
+                name: program.into(),
+                command: label,
+                success: out.status.success(),
+                stdout: cut(&out.stdout),
+                stderr: cut(&out.stderr),
+            }
+        }
+        Err(e) => VerifyStep {
+            name: program.into(),
+            command: label,
+            success: false,
+            stdout: String::new(),
+            stderr: format!("실행 실패: {e}"),
+        }
+    }
+}
+
+#[tauri::command]
+fn verify_changes(app: AppHandle, id: String) -> Result<VerifyResult, String> {
+    let state = app.state::<AppState>();
+    let worktree = state.agents.lock().unwrap().get(&id)
+        .map(|a| a.worktree.clone()).ok_or("없는 작업")?;
+    let wt = std::path::Path::new(&worktree);
+    let mut res = VerifyResult::default();
+    let mut detected: Vec<&str> = Vec::new();
+
+    // Node/JS — package.json의 scripts.test/build를 발견하면 실행
+    if wt.join("package.json").exists() {
+        detected.push("Node");
+        if let Ok(text) = std::fs::read_to_string(wt.join("package.json")) {
+            if let Ok(pkg) = serde_json::from_str::<Value>(&text) {
+                let scripts = pkg.get("scripts").and_then(|v| v.as_object()).cloned().unwrap_or_default();
+                if scripts.contains_key("build") { res.steps.push(run_in(&worktree, "npm", &["run", "build"])); }
+                if scripts.contains_key("test")  { res.steps.push(run_in(&worktree, "npm", &["test", "--", "--watch=false"])); }
+            }
+        }
+    }
+    // Rust — Cargo.toml 발견 시 cargo check + test (test는 시간 길 수 있어 --no-run)
+    if wt.join("Cargo.toml").exists() {
+        detected.push("Rust");
+        res.steps.push(run_in(&worktree, "cargo", &["check", "--message-format", "short"]));
+        // 테스트 컴파일만 — 실제 테스트는 옵션
+        res.steps.push(run_in(&worktree, "cargo", &["test", "--no-run", "--message-format", "short"]));
+    }
+    // Python — pytest 또는 pyproject 발견 시
+    if wt.join("pyproject.toml").exists() || wt.join("pytest.ini").exists() {
+        detected.push("Python");
+        // pytest를 시도(없으면 실패 step으로 기록)
+        res.steps.push(run_in(&worktree, "pytest", &["-q", "--maxfail=5"]));
+    }
+    // Go
+    if wt.join("go.mod").exists() {
+        detected.push("Go");
+        res.steps.push(run_in(&worktree, "go", &["build", "./..."]));
+        res.steps.push(run_in(&worktree, "go", &["test", "-count=1", "./..."]));
+    }
+
+    res.ran = !res.steps.is_empty();
+    res.success = res.ran && res.steps.iter().all(|s| s.success);
+    res.note = if detected.is_empty() {
+        "감지된 빌드 시스템이 없어요(package.json/Cargo.toml/pyproject.toml/go.mod 부재).".into()
+    } else { format!("감지됨: {}", detected.join(", ")) };
+    Ok(res)
+}
+
 // ---------------- 커맨드: 바뀐 점(diff) ----------------
 // 워크트리에서 '기준 브랜치 → 현재' 변경 전체를 보여준다.
 // 1) git add -A 로 새 파일 포함, 2) HEAD 이후 staged + 워킹트리 + base..HEAD 커밋 모두 합쳐 보여준다.
@@ -1357,7 +1539,8 @@ pub fn run() {
             read_usage,
             send_message,
             open_path,
-            get_base_branch
+            get_base_branch,
+            verify_changes
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

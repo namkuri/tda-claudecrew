@@ -278,6 +278,19 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .console.sub .con-body{flex:1;color:#aebac4;font-size:12px;min-height:64px}
 .console.sub.working{border-color:var(--run)}
 .console.sub.done{border-color:var(--accent-d)}
+.console.sub.error{border-color:var(--err)}
+.con-dot.error{background:var(--err)}
+
+/* 자동 검증 패널 */
+.verify-panel{margin:8px 16px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.vf-head{padding:8px 12px;border-bottom:1px solid var(--line);font-size:12px;display:flex;gap:10px;align-items:center}
+.vf-ok{color:var(--done)} .vf-bad{color:var(--err)} .vf-skip{color:var(--faint)}
+.vf-note{color:var(--dim)}
+.vf-step{padding:7px 12px;border-bottom:1px solid var(--line);font-size:12px}
+.vf-step:last-child{border-bottom:none}
+.vf-step.bad{background:rgba(255,107,107,.06)}
+.vf-cmd code{font-family:var(--mono);color:var(--ink)}
+.vf-out{margin:4px 0 0;padding:6px 8px;background:#0b0e11;border-radius:6px;font-family:var(--mono);font-size:11px;color:#aebac4;white-space:pre-wrap;max-height:120px;overflow:auto}
 
 /* 후속 메시지 입력창 */
 .follow-up{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--line);background:var(--panel)}
