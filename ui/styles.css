@@ -55,6 +55,8 @@ header{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:
 .controls label{font-size:12px;color:var(--dim)}
 select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-family:var(--font);margin-left:6px}
 .safe{font-size:12px;color:var(--faint)}
+.toggle{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--dim);cursor:pointer;user-select:none}
+.toggle input{accent-color:var(--accent);cursor:pointer}
 .controls .go{margin-left:auto;padding:11px 22px}
 
 #board{padding:20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:18px}
@@ -85,3 +87,15 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .sheet-h .x{margin-left:auto;cursor:pointer;color:var(--dim)}
 .sheet pre{margin:0;padding:16px;overflow:auto;font-family:var(--mono);font-size:12px;line-height:1.55}
 .diff-add{color:#7ee787} .diff-del{color:#ff7b72} .diff-meta{color:var(--faint)}
+
+/* 거시→미시 바뀐 점 리뷰 */
+.diff-summary{padding:12px 16px;border-bottom:1px solid var(--line);color:var(--dim);font-size:13px}
+.diff-summary b{color:var(--ink)}
+.diff-files{overflow:auto;padding:8px}
+.diff-file{border:1px solid var(--line);border-radius:10px;margin:8px;overflow:hidden}
+.diff-file-h{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;background:var(--panel2)}
+.diff-file-h:hover{background:#1a2129}
+.diff-file-h .caret{color:var(--dim);font-size:11px;width:12px}
+.diff-file-h .fname{font-family:var(--mono);font-size:12px;color:var(--ink);flex:1;word-break:break-all}
+.diff-file-h .fcount{font-family:var(--mono);font-size:11px}
+.diff-file-b{margin:0;padding:12px 14px;border-top:1px solid var(--line);background:#0b0e11;overflow:auto;font-family:var(--mono);font-size:12px;line-height:1.5}

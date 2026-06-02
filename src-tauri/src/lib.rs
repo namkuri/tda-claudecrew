@@ -188,10 +188,13 @@ fn setup_environment() -> Result<String, String> {
 
     // 스킬 설치 (~/.claude/skills/<name>/SKILL.md)
     let skills_dir = claude_dir.join("skills");
-    let skills: [(&str, &str); 3] = [
+    let skills: [(&str, &str); 6] = [
         ("git-master", include_str!("../skills/git-master/SKILL.md")),
         ("test-writer", include_str!("../skills/test-writer/SKILL.md")),
         ("frontend-ui", include_str!("../skills/frontend-ui/SKILL.md")),
+        ("browser-test", include_str!("../skills/browser-test/SKILL.md")),
+        ("doc-writer", include_str!("../skills/doc-writer/SKILL.md")),
+        ("init-deep", include_str!("../skills/init-deep/SKILL.md")),
     ];
     for (name, body) in skills {
         let dir = skills_dir.join(name);
@@ -199,7 +202,7 @@ fn setup_environment() -> Result<String, String> {
         std::fs::write(dir.join("SKILL.md"), body).map_err(|e| e.to_string())?;
     }
 
-    Ok("준비 완료: 전문가 5종 + 스킬 3종 설치 + 팀 기능 활성화 + 안전/품질 훅 4종 설치".into())
+    Ok("준비 완료: 전문가 5종 + 스킬 6종 설치 + 팀 기능 활성화 + 안전/품질 훅 설치".into())
 }
 
 // ~/.claude/claudecrew-hooks 에 OS별 훅 스크립트(두 벌)를 기록하고,
@@ -210,17 +213,21 @@ fn install_hooks(claude_dir: &std::path::Path, settings: &mut Value) -> Result<(
     std::fs::create_dir_all(&hooks_dir).map_err(|e| e.to_string())?;
 
     // Windows PowerShell + Unix bash 두 벌을 모두 기록(부록 A: OS 분기)
-    let ps_scripts: [(&str, &str); 4] = [
+    let ps_scripts: [(&str, &str); 6] = [
         ("pretooluse-bash.ps1", include_str!("../hooks/pretooluse-bash.ps1")),
         ("posttooluse-format.ps1", include_str!("../hooks/posttooluse-format.ps1")),
         ("stop-continue.ps1", include_str!("../hooks/stop-continue.ps1")),
         ("taskcompleted-test.ps1", include_str!("../hooks/taskcompleted-test.ps1")),
+        ("sessionstart-context.ps1", include_str!("../hooks/sessionstart-context.ps1")),
+        ("subagentstop-log.ps1", include_str!("../hooks/subagentstop-log.ps1")),
     ];
-    let sh_scripts: [(&str, &str); 4] = [
+    let sh_scripts: [(&str, &str); 6] = [
         ("pretooluse-bash.sh", include_str!("../hooks/pretooluse-bash.sh")),
         ("posttooluse-format.sh", include_str!("../hooks/posttooluse-format.sh")),
         ("stop-continue.sh", include_str!("../hooks/stop-continue.sh")),
         ("taskcompleted-test.sh", include_str!("../hooks/taskcompleted-test.sh")),
+        ("sessionstart-context.sh", include_str!("../hooks/sessionstart-context.sh")),
+        ("subagentstop-log.sh", include_str!("../hooks/subagentstop-log.sh")),
     ];
     // PowerShell 스크립트는 UTF-8 BOM으로 기록(한글 깨짐 방지)
     for (name, body) in ps_scripts {
@@ -296,6 +303,8 @@ fn install_hooks(claude_dir: &std::path::Path, settings: &mut Value) -> Result<(
     add_hook(settings, "Stop", None, script_cmd("stop-continue"));
     add_hook(settings, "TeammateIdle", None, script_cmd("stop-continue"));
     add_hook(settings, "TaskCompleted", None, script_cmd("taskcompleted-test"));
+    add_hook(settings, "SessionStart", None, script_cmd("sessionstart-context"));
+    add_hook(settings, "SubagentStop", None, script_cmd("subagentstop-log"));
 
     Ok(())
 }
@@ -310,6 +319,8 @@ fn create_agent(
     permission: String,
     branch: Option<String>,
     agent: Option<String>,
+    keepgoing: Option<bool>,
+    team: Option<bool>,
 ) -> Result<String, String> {
     if !PathBuf::from(&repo).join(".git").exists() {
         return Err(format!("선택한 폴더가 git 프로젝트가 아닙니다: {repo}"));
@@ -343,18 +354,28 @@ fn create_agent(
     state.agents.lock().unwrap().insert(id.clone(), info.clone());
     let _ = app.emit("agent_update", info);
 
-    // 지정 전문가가 있으면 프롬프트에 위임 지시를 주입(표시용 prompt는 원문 유지)
-    let effective_prompt = match agent.as_deref() {
-        Some(name) if !name.is_empty() => format!(
-            "다음 작업을 `{name}` 전문가(서브에이전트)에게 위임해 끝까지 처리하고, 끝나면 무엇을 했는지 한국어로 요약하세요:\n\n{prompt}"
-        ),
-        _ => prompt,
+    // 팀 모드 > 단일 전문가 위임 > 원문 (표시용 prompt는 원문 유지)
+    let team = team.unwrap_or(false);
+    let keepgoing = keepgoing.unwrap_or(false);
+    let effective_prompt = if team {
+        format!(
+            "당신은 '팀장'입니다. 다음 일을 작은 단위로 쪼개 적합한 전문가(서브에이전트: oracle 설계, \
+librarian 검색, implementer 구현, debugger 디버깅, code-reviewer 검토)에게 병렬로 위임해 끝까지 완수하세요. \
+각 단계 결과를 모아 검토하고, 끝나면 누가 무엇을 했는지 한국어로 요약하세요:\n\n{prompt}"
+        )
+    } else {
+        match agent.as_deref() {
+            Some(name) if !name.is_empty() => format!(
+                "다음 작업을 `{name}` 전문가(서브에이전트)에게 위임해 끝까지 처리하고, 끝나면 무엇을 했는지 한국어로 요약하세요:\n\n{prompt}"
+            ),
+            _ => prompt,
+        }
     };
 
     // 무거운 작업은 별도 스레드에서
     let app2 = app.clone();
     std::thread::spawn(move || {
-        run_agent(app2, id, repo, effective_prompt, model, permission, branch, worktree);
+        run_agent(app2, id, repo, effective_prompt, model, permission, branch, worktree, keepgoing);
     });
 
     Ok(id)
@@ -379,6 +400,7 @@ fn run_agent(
     permission: String,
     branch: String,
     worktree: String,
+    keepgoing: bool,
 ) {
     // 1) worktree 생성
     std::fs::create_dir_all(PathBuf::from(&repo).join(".agentboard")).ok();
@@ -408,6 +430,10 @@ fn run_agent(
     cmd.current_dir(&worktree)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // "끝까지 모드"가 켜지면 Stop/TeammateIdle 훅이 작동하도록 환경변수 전달
+    if keepgoing {
+        cmd.env("CLAUDECREW_KEEPGOING", "1");
+    }
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -603,6 +629,60 @@ fn cleanup_agent(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
+// ---------------- 커맨드: 검색 켜기/끄기 (MCP) ----------------
+// 부록A 5장. 프로젝트 <repo>/.mcp.json 에 공식문서 검색 MCP(context7, 키 불필요)를 켠다.
+// 안전: 자격증명을 만들지 않는다. Exa 등 키가 필요한 서버는 사용자가 직접 추가.
+#[tauri::command]
+fn enable_search(repo: String) -> Result<String, String> {
+    if !PathBuf::from(&repo).exists() {
+        return Err(format!("폴더가 없습니다: {repo}"));
+    }
+    let path = PathBuf::from(&repo).join(".mcp.json");
+    let mut root: Value = if path.exists() {
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
+            .unwrap_or(Value::Object(Default::default()))
+    } else {
+        Value::Object(Default::default())
+    };
+    if !root.is_object() {
+        root = Value::Object(Default::default());
+    }
+    if !root.get("mcpServers").map(|v| v.is_object()).unwrap_or(false) {
+        root["mcpServers"] = Value::Object(Default::default());
+    }
+    // context7: 공식 문서 검색, API 키 불필요
+    root["mcpServers"]["context7"] = serde_json::json!({
+        "command": "npx",
+        "args": ["-y", "@upstash/context7-mcp"]
+    });
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok("검색 켜짐: 공식 문서 검색(context7)을 연결했어요.".into())
+}
+
+#[tauri::command]
+fn disable_search(repo: String) -> Result<String, String> {
+    let path = PathBuf::from(&repo).join(".mcp.json");
+    if !path.exists() {
+        return Ok("검색은 이미 꺼져 있어요.".into());
+    }
+    let mut root: Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
+            .unwrap_or(Value::Object(Default::default()));
+    if let Some(servers) = root.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
+        servers.remove("context7");
+    }
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok("검색 꺼짐.".into())
+}
+
 // ---------------- 커맨드: 적용하기(변경 저장/commit) ----------------
 // 격리된 worktree(ab/<branch>)에서만 커밋한다. 메인 브랜치를 직접 바꾸지 않는다(안전 원칙).
 #[tauri::command]
@@ -661,7 +741,9 @@ pub fn run() {
             cleanup_agent,
             commit_agent,
             set_cost_cap,
-            get_cost_cap
+            get_cost_cap,
+            enable_search,
+            disable_search
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

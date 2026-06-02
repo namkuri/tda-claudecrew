@@ -67,6 +67,8 @@
       <button class="recipe" data-r="feature">✨ 기능 추가</button>
       <button class="recipe" data-r="explain">📖 코드 설명</button>
       <button class="recipe" data-r="test">🧪 테스트 만들기</button>
+      <button class="recipe" data-r="cleanup">🧹 정리·리팩터링</button>
+      <button class="recipe" data-r="review">🔍 코드 검토</button>
     </div>
     <textarea id="prompt" placeholder="무엇을 부탁할까요? 예) 로그인 버튼이 안 눌려요. 고쳐주세요."></textarea>
     <div class="controls">
@@ -77,6 +79,9 @@
           <option value="opus">꼼꼼하게</option>
         </select>
       </label>
+      <label class="toggle" title="멈추지 않고 끝까지 하도록 한 번 더 점검해요"><input type="checkbox" id="tglKeep"> 끝까지 모드</label>
+      <label class="toggle" title="공식 문서 검색(context7)을 켜요"><input type="checkbox" id="tglSearch"> 검색 켜기</label>
+      <label class="toggle" title="팀장이 전문가들에게 나눠 맡겨요"><input type="checkbox" id="tglTeam"> 팀에게 맡기기</label>
       <span class="safe">🔒 안전: 이 폴더 안에서만 작업해요</span>
       <button class="btn go" id="btnRun">▶ 전문가에게 맡기기</button>
     </div>
@@ -91,7 +96,8 @@
 <div class="overlay hidden" id="diffModal">
   <div class="sheet">
     <div class="sheet-h"><b id="diffTitle">바뀐 점</b><span class="x" id="diffClose">✕ 닫기</span></div>
-    <pre id="diffBody"></pre>
+    <div id="diffSummary" class="diff-summary"></div>
+    <div id="diffBody" class="diff-files"></div>
   </div>
 </div>
 

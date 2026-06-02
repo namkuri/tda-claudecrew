@@ -39,15 +39,23 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
 - `src-tauri/skills/<name>/SKILL.md` — 기본 스킬(`include_str!`로 포함, `~/.claude/skills/`에 기록)
 - `.github/workflows/{build,pages}.yml` — 클라우드 빌드(제어 정책 우회) + Pages 데모 배포
 - `docs/SETUP-GUIDE.md` — **사용자가 직접 할 일**(git init·push, Pages/Actions 켜기, 설치파일 내려받기)
+- `claudecrew-plugin/` — 전문가·스킬·훅·MCP를 한 덩어리로 묶은 배포용 플러그인(부록A 8)
 - `src-tauri/tauri.conf.json` — 창/번들/아이콘/`frontendDist: ../ui`
 - `src-tauri/capabilities/default.json` — dialog/opener 권한
 - `docs/ROADMAP.md` — **다음 단계 작업 백로그(우선순위·완료기준 포함)**
 
-## 4. 현재 구현 상태 (v0.2 — 마일스톤 v0.2 + 인프라 완료)
+## 4. 현재 구현 상태 (v0.3 — oMo/Superset 수준 강화)
 구현됨:
-- 커맨드: `check_claude`, `setup_environment`(전문가 5종 + **스킬 3종** 설치 + 팀 플래그 + **안전/품질 훅 4종**),
-  `create_agent`(worktree 생성 → `claude -p` 스트리밍, **agent 옵션으로 전문가 위임**), `list_agents`, `get_diff`,
-  `stop_agent`, `cleanup_agent`(되돌리기), **`commit_agent`(적용하기)**, **`set_cost_cap`/`get_cost_cap`(비용 상한)**.
+- 커맨드: `check_claude`, `setup_environment`(전문가 5종 + **스킬 6종** + 팀 플래그 + **안전/품질/컨텍스트 훅 6종**),
+  `create_agent`(worktree → `claude -p` 스트리밍, **agent 위임 / team 팀모드 / keepgoing 끝까지모드**), `list_agents`, `get_diff`,
+  `stop_agent`, `cleanup_agent`, **`commit_agent`(적용)**, **`set_cost_cap`/`get_cost_cap`**, **`enable_search`/`disable_search`(MCP 검색)**.
+- **스킬 6종(T2/v0.3)**: git-master, test-writer, frontend-ui, browser-test, doc-writer, init-deep → `~/.claude/skills/`. 전문가 `skills:` 연결.
+- **훅 6종(T1/v0.3)**: PreToolUse(위험차단)·PostToolUse(prettier)·Stop·TeammateIdle(끝까지, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질)·**SessionStart(컨텍스트 주입)·SubagentStop(정리)**.
+- **MCP 검색(v0.3)**: `enable_search(repo)`가 `<repo>/.mcp.json`에 context7(키 불필요) 연결. librarian에 `mcpServers: context7` 인라인. UI "검색 켜기" 토글.
+- **거시→미시 리뷰(v0.3)**: `get_diff`를 파일별로 파싱 → 요약(파일 수·+/-) → 파일 클릭 시 줄단위 색상 비교(Superset 스타일).
+- **레시피 6종(v0.3)**: 버그/기능/설명/테스트/정리·리팩터/코드검토 → 각자 전문가·모드 매핑.
+- **팀 오케스트레이션(v0.3)**: "팀에게 맡기기" 토글 → 팀장이 전문가들에게 위임하는 프롬프트로 실행.
+- **플러그인 패키징(v0.3)**: `claudecrew-plugin/`(.claude-plugin/plugin.json + hooks.json + .mcp.json) — 배포용 한 덩어리.
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.

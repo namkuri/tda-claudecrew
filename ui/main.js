@@ -31,7 +31,9 @@ function makeDemoApi(){
       case "get_cost_cap":      return Promise.resolve(5);
       case "set_cost_cap":      return Promise.resolve();
       case "list_agents":       return Promise.resolve([]);
-      case "get_diff":          return Promise.resolve("diff --git a/example.js b/example.js\n@@ -1,3 +1,4 @@\n-기존 코드\n+고친 코드\n+추가된 줄");
+      case "get_diff":          return Promise.resolve(
+        "diff --git a/src/login.js b/src/login.js\n--- a/src/login.js\n+++ b/src/login.js\n@@ -10,7 +10,8 @@\n function onLogin(){\n-  btn.onclick = null;\n+  btn.addEventListener('click', submit);\n+  btn.disabled = false;\n }\n" +
+        "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,2 +1,3 @@\n # 내 프로젝트\n+로그인 버튼 문제를 고쳤어요.\n");
       case "commit_agent":      return Promise.resolve("데모: 실제 저장(commit)은 데스크톱 앱에서 됩니다.");
       case "stop_agent":        if (agents[args.id]) { agents[args.id].status = "stopped"; emit("agent_update", { ...agents[args.id] }); } return Promise.resolve();
       case "cleanup_agent":     emit("agent_removed", { id: args.id }); return Promise.resolve();
@@ -50,10 +52,12 @@ let checkedOk = false, folderOk = !!repoPath, setupOk = localStorage.getItem("cc
 
 const STATUS_KO = { creating: "준비 중", running: "일하는 중", done: "끝남", error: "오류", stopped: "멈춤", committed: "저장됨" };
 const RECIPES = {
-  bug:     { speed: "sonnet", perm: "acceptEdits", agent: "debugger",    text: "다음 문제를 고쳐주세요: " },
-  feature: { speed: "sonnet", perm: "acceptEdits", agent: "implementer", text: "다음 기능을 추가해주세요: " },
-  explain: { speed: "haiku",  perm: "plan",        agent: "librarian",   text: "다음 코드를 쉬운 말로 설명해주세요: " },
-  test:    { speed: "sonnet", perm: "acceptEdits", agent: "implementer", text: "다음 대상에 대한 테스트를 만들고 실행해주세요: " },
+  bug:     { speed: "sonnet", perm: "acceptEdits", agent: "debugger",      text: "다음 문제를 고쳐주세요: " },
+  feature: { speed: "sonnet", perm: "acceptEdits", agent: "implementer",   text: "다음 기능을 추가해주세요: " },
+  explain: { speed: "haiku",  perm: "plan",        agent: "librarian",     text: "다음 코드를 쉬운 말로 설명해주세요: " },
+  test:    { speed: "sonnet", perm: "acceptEdits", agent: "implementer",   text: "다음 대상에 대한 테스트를 만들고 실행해주세요: " },
+  cleanup: { speed: "sonnet", perm: "acceptEdits", agent: "implementer",   text: "다음을 안전한 범위에서 정리·리팩터링해주세요(동작은 그대로): " },
+  review:  { speed: "sonnet", perm: "plan",        agent: "code-reviewer", text: "다음 코드/변경을 검토하고 개선점을 알려주세요: " },
 };
 
 function esc(s){return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
@@ -118,6 +122,21 @@ $("#costCap").addEventListener("change", () => {
   $("#costBanner").classList.add("hidden");
 });
 
+// "검색 켜기" 토글 → 프로젝트 .mcp.json 에 공식 문서 검색(context7) 연결/해제
+$("#tglSearch").addEventListener("change", async (e) => {
+  if (!repoPath) { e.target.checked = false; alert("먼저 폴더를 선택하세요."); return; }
+  try {
+    const res = await invoke(e.target.checked ? "enable_search" : "disable_search", { repo: repoPath });
+    if (typeof res === "string" && !DEMO) showHint(res);
+  } catch (err) { alert("검색 설정 실패: " + err); e.target.checked = !e.target.checked; }
+});
+
+function showHint(msg){
+  const b = $("#costBanner");
+  b.textContent = msg; b.classList.remove("hidden");
+  setTimeout(() => b.classList.add("hidden"), 3500);
+}
+
 $("#btnChangeFolder").addEventListener("click", async () => {
   const picked = await dialog.open({ directory: true, multiple: false, title: "작업할 폴더 고르기" });
   if (picked) { repoPath = picked; localStorage.setItem("cc_repo", repoPath); $("#folderLabel").textContent = repoPath; }
@@ -140,8 +159,10 @@ $("#btnRun").addEventListener("click", async () => {
   const model = $("#speed").value;
   const permission = $("#prompt").dataset.perm || "acceptEdits";
   const agent = $("#prompt").dataset.agent || null;
+  const keepgoing = $("#tglKeep").checked;
+  const team = $("#tglTeam").checked;
   try {
-    await invoke("create_agent", { repo: repoPath, prompt, model, permission, branch: null, agent });
+    await invoke("create_agent", { repo: repoPath, prompt, model, permission, branch: null, agent, keepgoing, team });
     $("#prompt").value = ""; delete $("#prompt").dataset.perm; delete $("#prompt").dataset.agent;
   } catch (e) { alert("실행 실패: " + e); }
 });
@@ -209,21 +230,66 @@ async function applyChanges(id){
   }
 }
 
-// ---------- 바뀐 점 ----------
+// ---------- 바뀐 점 (거시→미시: 요약 → 파일 → 줄) ----------
+// unified diff 문자열을 파일별로 쪼개 +/- 줄 수를 센다.
+function parseDiff(diff){
+  const files = [];
+  const chunks = diff.split(/^diff --git .*$/m).filter(c => c.trim());
+  // split 은 헤더 줄을 제거하므로, 헤더의 파일명을 따로 뽑기 위해 다시 매칭
+  const headers = diff.match(/^diff --git a\/(.*?) b\/(.*)$/gm) || [];
+  chunks.forEach((body, i) => {
+    let name = "(파일)";
+    const h = headers[i];
+    if (h){ const m = h.match(/ b\/(.*)$/); if (m) name = m[1]; }
+    else { const m = body.match(/\+\+\+ b\/(.*)/); if (m) name = m[1]; }
+    let adds = 0, dels = 0;
+    body.split("\n").forEach(l => {
+      if (l.startsWith("+") && !l.startsWith("+++")) adds++;
+      else if (l.startsWith("-") && !l.startsWith("---")) dels++;
+    });
+    files.push({ name, adds, dels, body });
+  });
+  return files;
+}
+
+function renderDiffLine(l){
+  const e = esc(l);
+  if (l.startsWith("+") && !l.startsWith("+++")) return '<span class="diff-add">'+e+'</span>';
+  if (l.startsWith("-") && !l.startsWith("---")) return '<span class="diff-del">'+e+'</span>';
+  if (l.startsWith("@@") || l.startsWith("index ") || l.startsWith("+++") || l.startsWith("---")) return '<span class="diff-meta">'+e+'</span>';
+  return e;
+}
+
 async function viewDiff(id){
   $("#diffTitle").textContent = (state.get(id)?.branch || "") + " — 바뀐 점";
+  $("#diffSummary").innerHTML = "";
   $("#diffBody").innerHTML = "불러오는 중…";
   $("#diffModal").classList.remove("hidden");
   try {
     const diff = await invoke("get_diff", { id });
-    $("#diffBody").innerHTML = diff.split("\n").map(l => {
-      const e = esc(l);
-      if (l.startsWith("+") && !l.startsWith("+++")) return '<span class="diff-add">'+e+'</span>';
-      if (l.startsWith("-") && !l.startsWith("---")) return '<span class="diff-del">'+e+'</span>';
-      if (l.startsWith("diff ") || l.startsWith("@@") || l.startsWith("index ")) return '<span class="diff-meta">'+e+'</span>';
-      return e;
-    }).join("\n");
-  } catch (e) { $("#diffBody").textContent = String(e); }
+    if (!diff || diff.trim() === "(바뀐 점 없음)"){
+      $("#diffSummary").textContent = "바뀐 점이 없어요.";
+      $("#diffBody").innerHTML = "";
+      return;
+    }
+    const files = parseDiff(diff);
+    const totalAdd = files.reduce((s,f)=>s+f.adds,0), totalDel = files.reduce((s,f)=>s+f.dels,0);
+    $("#diffSummary").innerHTML = `이번에 <b>파일 ${files.length}개</b>가 바뀌어요. <span class="diff-add">+${totalAdd}</span> <span class="diff-del">-${totalDel}</span> · 파일을 클릭하면 자세히 볼 수 있어요.`;
+    $("#diffBody").innerHTML = files.map((f, i) => `
+      <div class="diff-file">
+        <div class="diff-file-h" data-i="${i}">
+          <span class="caret">▸</span>
+          <span class="fname">${esc(f.name)}</span>
+          <span class="fcount"><span class="diff-add">+${f.adds}</span> <span class="diff-del">-${f.dels}</span></span>
+        </div>
+        <pre class="diff-file-b hidden" id="dfb-${i}">${f.body.split("\n").map(renderDiffLine).join("\n")}</pre>
+      </div>`).join("");
+    $("#diffBody").querySelectorAll(".diff-file-h").forEach(h => h.onclick = () => {
+      const body = document.getElementById("dfb-" + h.dataset.i);
+      const open = body.classList.toggle("hidden");
+      h.querySelector(".caret").textContent = open ? "▸" : "▾";
+    });
+  } catch (e) { $("#diffSummary").textContent = ""; $("#diffBody").textContent = String(e); }
 }
 $("#diffClose").addEventListener("click", () => $("#diffModal").classList.add("hidden"));
 

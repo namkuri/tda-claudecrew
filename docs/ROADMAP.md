@@ -79,6 +79,22 @@
 
 ---
 
+## 마일스톤 v0.3 — "oMo/Superset 수준 강화" ✅ 완료 (기획서·부록A 반영)
+> 기획보고서 + 부록A(Skills·Hooks 셋업)를 근거로 핵심 격차를 메움.
+
+- [x] **스킬 6종 완성**: browser-test·doc-writer·init-deep 추가(부록A 3.2). 전문가 `skills:` 연결.
+- [x] **MCP 검색 켜기**: `enable_search`/`disable_search` → `<repo>/.mcp.json`에 context7(키 불필요). librarian 인라인(부록A 5).
+- [x] **훅 6종**: SessionStart(컨텍스트 주입)·SubagentStop 추가(부록A 4.1).
+- [x] **거시→미시 리뷰**: 요약→파일별(+/-)→줄단위 색상 비교(기획 5.5, Superset). 데모 검증 완료.
+- [x] **레시피 6종**: 정리·리팩터링·코드검토 추가(기획 5.4).
+- [x] **팀 오케스트레이션(기초)**: "팀에게 맡기기"로 팀장→전문가 위임 프롬프트(V1.1 기초).
+- [x] **끝까지 모드 토글**: `keepgoing` → `CLAUDECREW_KEEPGOING=1` 전달로 Stop/TeammateIdle 훅 작동.
+- [x] **플러그인 패키징**: `claudecrew-plugin/`(부록A 8).
+
+**다음(v1에서 심화)**: 실제 에이전트 팀 병렬 시각화(전문가별 카드), Exa 웹검색 키 연결, 미리보기(포트).
+
+---
+
 ## 마일스톤 v1 — "팀 오케스트레이션 + 단일 설치형 앱"
 
 ### [ ] V1.1 실제 에이전트 팀 오케스트레이션
