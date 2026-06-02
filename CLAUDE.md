@@ -42,7 +42,8 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
 - `docs/SETUP-GUIDE.md` — **사용자가 직접 할 일**(git init·push, Pages/Actions 켜기, 설치파일 내려받기)
 - `docs/RUN-AND-TEST.md` — **데스크톱 앱 실행·기능별 테스트 시나리오**(온보딩~미리보기·팀·검색·복원까지)
 - `claudecrew-plugin/` — 전문가·스킬·훅·MCP를 한 덩어리로 묶은 배포용 플러그인(부록A 8)
-- `scripts/build-plugin.mjs` — `claudecrew-plugin/`을 src-tauri 원본으로 채우는 빌드 스크립트
+- `scripts/build-plugin.mjs` — `claudecrew-plugin/`을 src-tauri 원본으로 채우는 빌드 스크립트(`npm run plugin`)
+- `scripts/check-bundle.mjs` — 전문가/스킬/커맨드 형식 + lib.rs 설치 등록 드리프트 검증(`npm run check`)
 - `src-tauri/AGENTS.md` — 전문가/스킬/훅 거버넌스(추가 규칙·구성요소 표)
 - `src-tauri/tauri.conf.json` — 창/번들/아이콘/`frontendDist: ../ui`
 - `src-tauri/capabilities/default.json` — dialog/opener 권한
