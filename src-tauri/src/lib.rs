@@ -852,28 +852,10 @@ struct UsageStats {
     last_computed: String,  // stats-cache의 lastComputedDate
 }
 
-fn today_iso() -> String {
-    // Date를 못 쓰는 환경에서도 안전하게 — std::time + chrono 없이 직접 계산
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
-    let days = secs / 86400;
-    // 1970-01-01 부터 days. 그레고리력 계산(간단판).
-    let mut y = 1970i64; let mut d = days;
-    loop { let leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0); let yd = if leap {366} else {365};
-        if d >= yd { d -= yd; y += 1; } else { break; }
-    }
-    let mdays = [31,28,31,30,31,30,31,31,30,31,30,31];
-    let leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
-    let mut m = 0usize;
-    loop {
-        let dm = mdays[m] + if leap && m == 1 {1} else {0};
-        if d >= dm as i64 { d -= dm as i64; m += 1; } else { break; }
-    }
-    format!("{:04}-{:02}-{:02}", y, m + 1, d + 1)
-}
-
+// 사용자 PC의 '오늘'은 UI(JS)가 알려준다. Rust std에는 로컬 시간이 없어 외부 의존 없이 정확히 알 수 없기 때문.
+// (UTC 기준으로 계산하면 한국 KST 사용자는 9시간 어긋난다.)
 #[tauri::command]
-fn read_usage() -> UsageStats {
+fn read_usage(today: Option<String>) -> UsageStats {
     let mut out = UsageStats::default();
     let home = std::env::var("USERPROFILE").ok().or_else(|| std::env::var("HOME").ok());
     let Some(home) = home.map(PathBuf::from) else { return out };
@@ -897,23 +879,24 @@ fn read_usage() -> UsageStats {
     out.total_messages = v.get("totalMessages").and_then(|x| x.as_u64()).unwrap_or(0);
     out.last_computed = v.get("lastComputedDate").and_then(|x| x.as_str()).unwrap_or("").to_string();
 
-    // 오늘/주간
-    let today = today_iso();
-    if let Some(arr) = v.get("dailyActivity").and_then(|x| x.as_array()) {
-        for d in arr {
-            let date = d.get("date").and_then(|x| x.as_str()).unwrap_or("");
-            let mc = d.get("messageCount").and_then(|x| x.as_u64()).unwrap_or(0);
-            if date == today { out.today_messages += mc; }
-            if date >= today.as_str() || cmp_recent7(date, &today) { out.week_messages += mc; }
+    // 오늘/주간 — today는 UI에서 받은 사용자 로컬 날짜. 없으면 집계 생략(부정확보다 명시적 0이 낫다).
+    if let Some(today) = today.as_deref() {
+        if let Some(arr) = v.get("dailyActivity").and_then(|x| x.as_array()) {
+            for d in arr {
+                let date = d.get("date").and_then(|x| x.as_str()).unwrap_or("");
+                let mc = d.get("messageCount").and_then(|x| x.as_u64()).unwrap_or(0);
+                if date == today { out.today_messages += mc; }
+                if cmp_recent7(date, today) { out.week_messages += mc; }
+            }
         }
-    }
-    if let Some(arr) = v.get("dailyModelTokens").and_then(|x| x.as_array()) {
-        for d in arr {
-            let date = d.get("date").and_then(|x| x.as_str()).unwrap_or("");
-            let tok: u64 = d.get("tokensByModel").and_then(|x| x.as_object())
-                .map(|o| o.values().filter_map(|v| v.as_u64()).sum()).unwrap_or(0);
-            if date == today { out.today_tokens += tok; }
-            if cmp_recent7(date, &today) { out.week_tokens += tok; }
+        if let Some(arr) = v.get("dailyModelTokens").and_then(|x| x.as_array()) {
+            for d in arr {
+                let date = d.get("date").and_then(|x| x.as_str()).unwrap_or("");
+                let tok: u64 = d.get("tokensByModel").and_then(|x| x.as_object())
+                    .map(|o| o.values().filter_map(|v| v.as_u64()).sum()).unwrap_or(0);
+                if date == today { out.today_tokens += tok; }
+                if cmp_recent7(date, today) { out.week_tokens += tok; }
+            }
         }
     }
 
@@ -1026,7 +1009,8 @@ fn restore_agents(app: AppHandle, repo: String) -> Vec<AgentInfo> {
                         id: id.clone(),
                         repo: repo.clone(),
                         branch: branch.clone(),
-                        prompt: "(이전 작업 — 복원됨)".into(),
+                        // 영속화 파일이 없는(이전 버전에서 만든) worktree → 브랜치명을 그대로 노출
+                        prompt: branch.clone(),
                         model: String::new(),
                         permission: String::new(),
                         worktree: wt.clone(),
@@ -1048,20 +1032,46 @@ fn restore_agents(app: AppHandle, repo: String) -> Vec<AgentInfo> {
     list_agents(app)
 }
 
+// 저장소의 기본(기준) 브랜치를 검출한다. origin/HEAD → main → master 순으로 폴백.
+fn detect_base_branch(repo: &str) -> String {
+    // 1) origin/HEAD가 가리키는 브랜치 (예: 'origin/main')
+    if let Ok(s) = git(repo, &["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"]) {
+        let s = s.trim();
+        if let Some(b) = s.strip_prefix("origin/") { if !b.is_empty() { return b.to_string(); } }
+    }
+    // 2) 로컬에 main/master 가 있는지
+    for name in ["main", "master"] {
+        if git(repo, &["rev-parse", "--verify", "--quiet", name]).is_ok() {
+            return name.to_string();
+        }
+    }
+    // 3) 최후 폴백: 현재 HEAD가 가리키는 브랜치 (안전한 default)
+    git(repo, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .map(|s| s.trim().to_string()).unwrap_or_else(|_| "main".into())
+}
+
+#[tauri::command]
+fn get_base_branch(app: AppHandle, id: String) -> Result<String, String> {
+    let state = app.state::<AppState>();
+    let repo = state.agents.lock().unwrap().get(&id).map(|a| a.repo.clone()).ok_or("없는 작업")?;
+    Ok(detect_base_branch(&repo))
+}
+
 // ---------------- 커맨드: 바뀐 점(diff) ----------------
+// 워크트리에서 '기준 브랜치 → 현재' 변경 전체를 보여준다.
+// 1) git add -A 로 새 파일 포함, 2) HEAD 이후 staged + 워킹트리 + base..HEAD 커밋 모두 합쳐 보여준다.
 #[tauri::command]
 fn get_diff(app: AppHandle, id: String) -> Result<String, String> {
     let state = app.state::<AppState>();
-    let worktree = state
-        .agents
-        .lock()
-        .unwrap()
-        .get(&id)
-        .map(|a| a.worktree.clone())
+    let (worktree, repo) = state.agents.lock().unwrap().get(&id)
+        .map(|a| (a.worktree.clone(), a.repo.clone()))
         .ok_or("없는 작업")?;
-    // 격리 worktree라 staging 부작용 없음 → 새 파일 포함 diff
+    let base = detect_base_branch(&repo);
+    // 격리 worktree라 staging 부작용 없음 → 새 파일까지 잡히게 add
     git(&worktree, &["add", "-A"]).ok();
-    let diff = git(&worktree, &["diff", "--cached"]).unwrap_or_default();
+    // base..HEAD (커밋된 변경) + working tree(stage 포함)를 한 번에 — 'base...HEAD'는 머지 베이스 기준 비교라 더 견고.
+    // 다만 working tree 변경도 포함하려면 worktree 의 인덱스/working 까지 합쳐야 한다 → 'base' 와 worktree 인덱스 비교.
+    let diff = git(&worktree, &["diff", &base]).unwrap_or_default();
     Ok(if diff.trim().is_empty() { "(바뀐 점 없음)".into() } else { diff })
 }
 
@@ -1346,7 +1356,8 @@ pub fn run() {
             check_api_mode,
             read_usage,
             send_message,
-            open_path
+            open_path,
+            get_base_branch
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

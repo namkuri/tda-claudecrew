@@ -105,6 +105,13 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **대화 상대 라벨**: `AgentInfo.role` 추가(`orchestrator`/`team`/전문가명). 에이전트 뷰 말풍선 위에 "대화 상대: 오케스트레이터/팀장(병렬 위임)/<전문가>" 칩 표시.
   - **작업 상태 디스크 영속화**: `.agentboard/<branch>/.cc-state.json`에 prompt/status/session_id/role/output/cost/tokens 저장(매 줄 출력의 5건마다, set_status·agent_done에서). `restore_agents`가 이 파일을 읽어 **터미널 로그·세션ID·역할까지 진짜 복원**.
   - **worktree 가시화**: 사이드바 행 툴팁 = `역할 · worktree 경로`. Git 패널에 worktree 경로 + 📁 폴더 열기 버튼(`open_path` 커맨드).
+- **진짜 vs 가짜 전수 점검(v0.8.5)** — 사용자 명령 "데모/스텁 없도록":
+  - **read_usage 시간 정확화**: 백엔드의 UTC `today_iso` 제거 → UI가 `new Date().toLocaleDateString("sv-SE")`로 사용자 로컬 날짜를 백엔드에 전달. KST 등 시간대에서 "오늘"이 정확. 잘못된 `>= today` 조건도 제거.
+  - **기준 브랜치 동적 검출**: `get_base_branch` 커맨드 추가 — `origin/HEAD` → `main` → `master` → 현재 HEAD 순으로 폴백. `detect_base_branch` 헬퍼. 사이드바 wsBase·Git 패널 헤더가 동적 baseBranch 표시(이전 "main" 하드코딩 제거).
+  - **get_diff 정확화**: `git diff --cached`(staging만) → `git diff <base>`(기준 브랜치 대비, 새 파일 포함하도록 `add -A` 선행). UI 라벨도 "기준 브랜치 대비 변경"으로 솔직하게.
+  - **restore_agents 폴백 라벨 제거**: `.cc-state.json` 없는 마이그레이션 케이스에서 "(이전 작업 — 복원됨)" placeholder → branch명 그대로(솔직).
+  - **데모 모드 가시성**: 데스크톱 빌드에서는 `window.__TAURI__` 가드로 절대 미실행. 데모 mock의 `read_usage`도 `available: false`로 명시(데스크톱과 헷갈리지 않도록). 데모 진입 시 콘솔에 `[ClaudeCrew] Demo mode` 경고.
+  - **.gitattributes**: `.sh` 파일 LF 강제(Windows에서 푸시해도 Unix에서 깨지지 않음).
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.

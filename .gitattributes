@@ -1,0 +1,14 @@
+# 셸 스크립트와 훅은 Unix LF로 유지(Windows에서 푸시해도 CRLF로 바뀌지 않게).
+*.sh text eol=lf
+src-tauri/hooks/*.sh text eol=lf
+src-tauri/skills/**/scripts/*.sh text eol=lf
+claudecrew-plugin/hooks/*.sh text eol=lf
+claudecrew-plugin/skills/**/scripts/*.sh text eol=lf
+
+# 텍스트의 기본은 자동
+* text=auto
+
+# 바이너리는 만지지 않음
+*.png binary
+*.icns binary
+*.ico binary

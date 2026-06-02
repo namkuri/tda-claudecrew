@@ -1,9 +1,14 @@
 // ClaudeCrew UI — Tauri 글로벌 API 사용 (withGlobalTauri: true)
-// GitHub Pages 등 브라우저에서 백엔드 없이 열렸을 때는 '데모 모드'로 폴백한다.
+// ──────────────────────────────────────────────────────────────────────────
+// 데스크톱 앱(Tauri WebView)에서는 window.__TAURI__ 가 항상 존재 → 실제 백엔드만 사용.
+// 데모 모드는 GitHub Pages 같은 '백엔드 없는 정적 호스팅' 전용 폴백이며,
+// 데스크톱 빌드에서는 절대 실행되지 않는다. (시각 미리보기 목적)
+// ──────────────────────────────────────────────────────────────────────────
 const DEMO = !(window.__TAURI__ && window.__TAURI__.core);
 const { invoke, listen, dialog } = DEMO
   ? makeDemoApi()
   : { invoke: window.__TAURI__.core.invoke, listen: window.__TAURI__.event.listen, dialog: window.__TAURI__.dialog };
+if (DEMO) console.warn("[ClaudeCrew] Demo mode (no Tauri backend) — using mock data. Real install runs as the desktop app.");
 
 // ---------- 다국어 (i18n) ----------
 const I18N = {
@@ -59,7 +64,7 @@ const I18N = {
     rtext_plan: "다음 작업을 hyperplan(적대적 다중 에이전트 계획)으로 계획 세워주세요: ", rtext_security: "다음을 security-research 스킬로 보안 점검해주세요(보고만, 파일 미수정): ",
     rtext_gate: "현재 변경을 pre-publish-review 스킬로 배포 전에 여러 관점으로 병렬 검토해주세요(막음 항목이 있으면 보류): ",
     newTask: "＋ 새 작업", newTabLabel: "＋ 새 작업", connected: "연결됨", disconnected: "연결 안 됨", demoConn: "데모 모드",
-    gpEmpty: "작업을 선택하면 변경/커밋 상태가 여기에 보여요.", gpBase: "기준", gpAgainst: "main 대비 변경", gpCommitPh: "저장(커밋) 메시지…", gpCommit: "커밋", gpNoChange: "바뀐 점이 없어요.",
+    gpEmpty: "작업을 선택하면 변경/커밋 상태가 여기에 보여요.", gpBase: "기준", gpAgainst: "기준 브랜치 대비 변경", gpCommitPh: "저장(커밋) 메시지…", gpCommit: "커밋", gpNoChange: "바뀐 점이 없어요.",
     avApply: "적용", avStop: "멈추기", avRevert: "되돌리기", avDiff: "전체 diff", termWaiting: "에이전트를 기다리는 중…",
     sb_creating: "저 준비하고 있어요…", sb_running: "저 지금 작업하는 중이에요!", sb_done: "저 작업 끝냈어요! ✅", sb_committed: "저장까지 마쳤어요! 💾", sb_error: "앗, 문제가 생겼어요 😵", sb_stopped: "잠깐 멈췄어요 ⏸",
     orchestrator: "오케스트레이터", agentConsole: "에이전트 콘솔", sub_working: "작업 받는 중…", sub_done: "완료",
@@ -125,7 +130,7 @@ const I18N = {
     rtext_plan: "Please plan the following task using hyperplan (adversarial multi-agent planning): ", rtext_security: "Please do a security check on the following with the security-research skill (report only, no edits): ",
     rtext_gate: "Please run a pre-publish review on the current changes with the pre-publish-review skill (parallel, multi-perspective; hold if any blocker): ",
     newTask: "＋ New task", newTabLabel: "＋ New task", connected: "Connected", disconnected: "Not connected", demoConn: "Demo mode",
-    gpEmpty: "Select a task to see its changes and commit status here.", gpBase: "Base", gpAgainst: "Changes vs main", gpCommitPh: "Commit message…", gpCommit: "Commit", gpNoChange: "No changes.",
+    gpEmpty: "Select a task to see its changes and commit status here.", gpBase: "Base", gpAgainst: "Changes vs base", gpCommitPh: "Commit message…", gpCommit: "Commit", gpNoChange: "No changes.",
     avApply: "Apply", avStop: "Stop", avRevert: "Revert", avDiff: "Full diff", termWaiting: "Waiting for the agent…",
     sb_creating: "Getting ready…", sb_running: "I'm working on it!", sb_done: "All done! ✅", sb_committed: "Saved it! 💾", sb_error: "Oops, something went wrong 😵", sb_stopped: "Paused for now ⏸",
     orchestrator: "Orchestrator", agentConsole: "Agent console", sub_working: "Receiving task…", sub_done: "done",
@@ -198,8 +203,10 @@ function makeDemoApi(){
   }
   const invoke = (cmd, args = {}) => {
     switch (cmd){
-      case "read_usage":        return Promise.resolve({ available:true, today_tokens:185000, week_tokens:1240000, today_messages:42, week_messages:286, total_messages:1320, total_sessions:18, models:["claude-sonnet-4-6","claude-opus-4-7"] });
+      case "read_usage":        // 데모: stats-cache 없음 표시(데스크톱에서는 진짜 파일을 읽음)
+                                return Promise.resolve({ available:false, today_tokens:0, week_tokens:0, today_messages:0, week_messages:0, total_messages:0, total_sessions:0, models:[] });
       case "open_path":         console.log("[demo] open_path", args.path); return Promise.resolve();
+      case "get_base_branch":   return Promise.resolve("main");
       case "send_message": {
         const cur = agents[args.id]; if (!cur) return Promise.resolve();
         emit("agent_output", { id: args.id, text: "\n💬 사용자: " + args.prompt });
@@ -235,6 +242,7 @@ let checkedOk = false, folderOk = !!repoPath, setupOk = localStorage.getItem("cc
 let selectedId = null;          // 현재 선택된 작업(null = 새 작업/컴포저)
 const openTabs = [];            // 열린 탭(작업 id 순서)
 let authMode = localStorage.getItem("cc_authmode") || "subscription"; // subscription(앱 플랜) | api
+let baseBranch = "main"; // 저장소의 기본/기준 브랜치 — 작업 선택 시 백엔드가 검출해 채움
 
 function repoBaseName(){
   if (!repoPath) return t("noFolder");
@@ -556,7 +564,12 @@ function addWeekly(id, tok){ if (!tok || weekData.ids.includes(id)) return; week
 let usageStats = { available: false, today_tokens: 0, week_tokens: 0, today_messages: 0, week_messages: 0,
                    total_messages: 0, total_sessions: 0, models: [] };
 async function refreshUsage(){
-  try { const u = await invoke("read_usage"); if (u) usageStats = u; }
+  try {
+    // 사용자 로컬 날짜(YYYY-MM-DD)를 백엔드에 전달 — UTC 의존 제거(KST 등 시간대 정확성)
+    const today = new Date().toLocaleDateString("sv-SE"); // "sv-SE"가 ISO 형식과 동일
+    const u = await invoke("read_usage", { today });
+    if (u) usageStats = u;
+  }
   catch(_){ /* DEMO에서는 없음 */ }
   renderStatusbar();
 }
@@ -652,7 +665,12 @@ async function ensureStat(id){
 
 // 선택/탭/컴포저 전환
 function openTab(id){ if (!openTabs.includes(id)) openTabs.push(id); }
-function selectAgent(id){ if (!state.has(id)) return; openTab(id); selectedId = id; render(); }
+function selectAgent(id){
+  if (!state.has(id)) return;
+  openTab(id); selectedId = id; render();
+  // 작업이 속한 저장소의 기준 브랜치를 검출해 라벨에 반영(가짜 'main' 하드코딩 제거)
+  invoke("get_base_branch", { id }).then(b => { if (b && b !== baseBranch) { baseBranch = b; render(); } }).catch(()=>{});
+}
 function closeTab(id){
   const i = openTabs.indexOf(id); if (i >= 0) openTabs.splice(i, 1);
   if (selectedId === id) selectedId = openTabs.length ? openTabs[Math.min(i, openTabs.length - 1)] : null;
@@ -687,6 +705,8 @@ function renderStatusStrip(){
 function renderSidebar(){
   $("#repoName").textContent = repoBaseName();
   $("#repoCount").textContent = state.size;
+  const wsBaseTitle = document.querySelector("#wsBase .ws-title");
+  if (wsBaseTitle) wsBaseTitle.textContent = baseBranch;
   const list = $("#wsList"); if (!list) return;
   list.innerHTML = "";
   [...state.values()].forEach(a => {
@@ -801,7 +821,7 @@ function renderGit(){
     ? st.files.map(f => `<div class="gp-file" data-fdiff="1"><span class="fn">${esc(f.name)}</span><span class="fst"><span class="gp-add">+${f.adds}</span><span class="gp-del">-${f.dels}</span></span></div>`).join("")
     : `<div class="gp-empty" style="padding:4px 6px">${t("gpNoChange")}</div>`;
   gp.innerHTML =
-    `<div class="gp-head">${t("gpBase")}: <b>main</b> · #${shortId(a.id)}</div>
+    `<div class="gp-head">${t("gpBase")}: <b>${esc(baseBranch)}</b> · #${shortId(a.id)}</div>
      <div class="gp-sec">
        <h4 title="${esc(t("wtTitle"))}">${t("wtPath")}</h4>
        <div class="gp-wt"><code class="gp-wtpath" title="${esc(a.worktree || "")}">${esc(a.worktree || "")}</code>
