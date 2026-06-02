@@ -85,19 +85,37 @@ fn hide_window(_cmd: &mut Command) {}
 #[cfg(windows)]
 fn resolve_claude_exe() -> Option<std::path::PathBuf> {
     use std::env;
-    // 1) where 결과 첫 줄
+    use std::path::PathBuf;
+    // 확장자 우선순위: cmd > exe > bat 만 받아들인다.
+    // 확장자 없는 파일(예: npm/nvm 글로벌의 unix용 셸 스크립트)은 무시 — Windows에서 실행 시
+    // "올바른 Win32 응용 프로그램이 아닙니다(os error 193)"가 난다.
+    let ok_ext = |p: &PathBuf| -> Option<u8> {
+        let e = p.extension().and_then(|x| x.to_str()).map(|s| s.to_ascii_lowercase());
+        match e.as_deref() {
+            Some("cmd") => Some(0),
+            Some("exe") => Some(1),
+            Some("bat") => Some(2),
+            _ => None,
+        }
+    };
+
+    // 1) where claude 가 나열한 후보 중 적합한 확장자만 골라 우선순위로 선택
     if let Ok(out) = std::process::Command::new("where").arg("claude").output() {
         if out.status.success() {
-            if let Some(line) = String::from_utf8_lossy(&out.stdout).lines().next() {
-                let p = std::path::PathBuf::from(line.trim());
-                if p.exists() { return Some(p); }
-            }
+            let mut candidates: Vec<(u8, PathBuf)> = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(|l| PathBuf::from(l.trim()))
+                .filter(|p| p.exists())
+                .filter_map(|p| ok_ext(&p).map(|r| (r, p)))
+                .collect();
+            candidates.sort_by_key(|(r, _)| *r);
+            if let Some((_, p)) = candidates.into_iter().next() { return Some(p); }
         }
     }
-    // 2) PATH 직접 탐색(확장자: cmd, exe, bat)
+    // 2) PATH 직접 탐색 — 확장자 우선순위 그대로
     if let Ok(path) = env::var("PATH") {
-        for dir in env::split_paths(&path) {
-            for ext in ["cmd", "exe", "bat"] {
+        for ext in ["cmd", "exe", "bat"] {
+            for dir in env::split_paths(&path) {
                 let cand = dir.join(format!("claude.{ext}"));
                 if cand.exists() { return Some(cand); }
             }
@@ -183,13 +201,28 @@ fn extract_text(evt: &Value) -> Option<String> {
 // ---------------- 커맨드: Claude 설치 확인 ----------------
 #[tauri::command]
 fn check_claude() -> Result<String, String> {
+    // 어떤 실행 파일을 골랐는지 진단 정보로 함께 알려준다.
+    #[cfg(windows)]
+    let picked = resolve_claude_exe().map(|p| p.to_string_lossy().to_string());
+    #[cfg(not(windows))]
+    let picked: Option<String> = None;
+
     let out = claude_command(&["--version".into()])
         .output()
-        .map_err(|e| format!("claude 실행 실패: {e}"))?;
+        .map_err(|e| {
+            let extra = picked.as_deref().map(|p| format!(" (선택 경로: {p})")).unwrap_or_default();
+            format!("claude 실행 실패: {e}{extra}")
+        })?;
     if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        let ver = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        Ok(picked.map(|p| format!("{ver}  ·  {p}")).unwrap_or(ver))
     } else {
-        Err("claude 명령을 찾지 못했습니다. Claude Code 설치/로그인을 확인하세요.".into())
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let extra = picked.as_deref().map(|p| format!(" (선택 경로: {p})")).unwrap_or_default();
+        Err(format!(
+            "claude --version 실패{extra}\n→ {}\n확인: ① 터미널에서 `claude --version` 동작 여부 ② Claude Code 재로그인 ③ PATH에 claude.cmd/.exe가 있는지",
+            if stderr.is_empty() { "(stderr 없음)".to_string() } else { stderr }
+        ))
     }
 }
 
