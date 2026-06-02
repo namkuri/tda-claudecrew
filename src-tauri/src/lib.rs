@@ -22,9 +22,10 @@ struct AgentInfo {
     model: String,
     permission: String,
     worktree: String,
-    status: String,        // creating | running | done | error | stopped
+    status: String,        // creating | running | done | error | stopped | committed
     cost: Option<f64>,
     pid: Option<u32>,
+    port: Option<u16>,     // 감지된 dev 서버 포트(미리보기)
 }
 
 struct AppState {
@@ -311,6 +312,7 @@ fn install_hooks(claude_dir: &std::path::Path, settings: &mut Value) -> Result<(
 
 // ---------------- 커맨드: 에이전트 생성/실행 ----------------
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn create_agent(
     app: AppHandle,
     repo: String,
@@ -350,6 +352,7 @@ fn create_agent(
         status: "creating".into(),
         cost: None,
         pid: None,
+        port: None,
     };
     state.agents.lock().unwrap().insert(id.clone(), info.clone());
     let _ = app.emit("agent_update", info);
@@ -467,6 +470,7 @@ fn run_agent(
     }
 
     // stdout 라인 단위 파싱 → 이벤트
+    let mut teammates: HashMap<String, String> = HashMap::new(); // tool_use_id → 전문가명
     if let Some(out) = child.stdout.take() {
         let reader = BufReader::new(out);
         for line in reader.lines().map_while(Result::ok) {
@@ -476,6 +480,7 @@ fn run_agent(
             }
             match serde_json::from_str::<Value>(line) {
                 Ok(evt) => {
+                    process_teammates(&app, &id, &evt, &mut teammates);
                     if evt.get("type").and_then(|v| v.as_str()) == Some("result") {
                         if let Some(cost) = evt.get("total_cost_usd").and_then(|v| v.as_f64()) {
                             {
@@ -507,11 +512,118 @@ fn run_agent(
     }
 }
 
+// 팀 모드에서 서브에이전트(Task) 호출/완료를 추적해 UI에 전문가별 진행을 알린다.
+fn process_teammates(app: &AppHandle, agent_id: &str, evt: &Value, map: &mut HashMap<String, String>) {
+    match evt.get("type").and_then(|v| v.as_str()) {
+        Some("assistant") => {
+            if let Some(content) = evt
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+            {
+                for b in content {
+                    if b.get("type").and_then(|v| v.as_str()) == Some("tool_use")
+                        && b.get("name").and_then(|v| v.as_str()) == Some("Task")
+                    {
+                        let tuid = b.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let input = b.get("input");
+                        let name = input
+                            .and_then(|i| i.get("subagent_type"))
+                            .and_then(|v| v.as_str())
+                            .or_else(|| input.and_then(|i| i.get("description")).and_then(|v| v.as_str()))
+                            .unwrap_or("전문가")
+                            .to_string();
+                        let desc = input
+                            .and_then(|i| i.get("description"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        if !tuid.is_empty() {
+                            map.insert(tuid, name.clone());
+                        }
+                        let _ = app.emit(
+                            "teammate_update",
+                            serde_json::json!({ "agentId": agent_id, "name": name, "desc": desc, "status": "working" }),
+                        );
+                    }
+                }
+            }
+        }
+        Some("user") => {
+            if let Some(content) = evt
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+            {
+                for b in content {
+                    if b.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
+                        if let Some(tuid) = b.get("tool_use_id").and_then(|v| v.as_str()) {
+                            if let Some(name) = map.remove(tuid) {
+                                let _ = app.emit(
+                                    "teammate_update",
+                                    serde_json::json!({ "agentId": agent_id, "name": name, "desc": "", "status": "done" }),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 fn emit_output(app: &AppHandle, id: &str, text: &str) {
+    note_port(app, id, text);
     let _ = app.emit(
         "agent_output",
         serde_json::json!({ "id": id, "text": text }),
     );
+}
+
+// 출력 줄에서 dev 서버 포트(localhost:NNNN)를 best-effort로 뽑는다.
+fn detect_port(line: &str) -> Option<u16> {
+    let lower = line.to_lowercase();
+    for marker in ["localhost:", "127.0.0.1:", "0.0.0.0:"] {
+        if let Some(pos) = lower.find(marker) {
+            let rest = &line[pos + marker.len()..];
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(p) = digits.parse::<u16>() {
+                if p >= 1024 {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    None
+}
+
+// 포트를 한 번 발견하면 저장하고 UI에 알린다.
+fn note_port(app: &AppHandle, id: &str, line: &str) {
+    if let Some(p) = detect_port(line) {
+        let state = app.state::<AppState>();
+        let mut changed = false;
+        if let Some(a) = state.agents.lock().unwrap().get_mut(id) {
+            if a.port.is_none() {
+                a.port = Some(p);
+                changed = true;
+            }
+        }
+        if changed {
+            if let Some(a) = state.agents.lock().unwrap().get(id) {
+                let _ = app.emit("agent_update", a.clone());
+            }
+        }
+    }
+}
+
+// ---------------- 커맨드: 미리보기(브라우저로 열기) ----------------
+#[tauri::command]
+fn open_url(app: AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 // ---------------- 커맨드: 목록 ----------------
@@ -519,6 +631,56 @@ fn emit_output(app: &AppHandle, id: &str, text: &str) {
 fn list_agents(app: AppHandle) -> Vec<AgentInfo> {
     let state = app.state::<AppState>();
     state.agents.lock().unwrap().values().cloned().collect()
+}
+
+// ---------------- 커맨드: 작업 공간 복원 ----------------
+// 앱 재시작 후에도 .agentboard/ 아래 worktree 들을 보드에 복원한다(V1.3).
+#[tauri::command]
+fn restore_agents(app: AppHandle, repo: String) -> Vec<AgentInfo> {
+    if let Ok(out) = git(&repo, &["worktree", "list", "--porcelain"]) {
+        let state = app.state::<AppState>();
+        for line in out.lines() {
+            if let Some(p) = line.strip_prefix("worktree ") {
+                let wt = p.trim().to_string();
+                if !wt.contains(".agentboard") {
+                    continue;
+                }
+                let exists = state
+                    .agents
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .any(|a| a.worktree == wt);
+                if exists {
+                    continue;
+                }
+                let branch = PathBuf::from(&wt)
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "복원".into());
+                let id = {
+                    let mut c = state.counter.lock().unwrap();
+                    *c += 1;
+                    format!("r{}", *c)
+                };
+                let info = AgentInfo {
+                    id: id.clone(),
+                    repo: repo.clone(),
+                    branch,
+                    prompt: "(이전 작업 — 복원됨)".into(),
+                    model: String::new(),
+                    permission: String::new(),
+                    worktree: wt,
+                    status: "done".into(),
+                    cost: None,
+                    pid: None,
+                    port: None,
+                };
+                state.agents.lock().unwrap().insert(id, info);
+            }
+        }
+    }
+    list_agents(app)
 }
 
 // ---------------- 커맨드: 바뀐 점(diff) ----------------
@@ -631,13 +793,9 @@ fn cleanup_agent(app: AppHandle, id: String) -> Result<(), String> {
 
 // ---------------- 커맨드: 검색 켜기/끄기 (MCP) ----------------
 // 부록A 5장. 프로젝트 <repo>/.mcp.json 에 공식문서 검색 MCP(context7, 키 불필요)를 켠다.
-// 안전: 자격증명을 만들지 않는다. Exa 등 키가 필요한 서버는 사용자가 직접 추가.
-#[tauri::command]
-fn enable_search(repo: String) -> Result<String, String> {
-    if !PathBuf::from(&repo).exists() {
-        return Err(format!("폴더가 없습니다: {repo}"));
-    }
-    let path = PathBuf::from(&repo).join(".mcp.json");
+// 안전: 우리가 자격증명을 만들지 않는다. Exa 웹검색은 '사용자 본인 키'를 입력했을 때만 추가한다.
+fn load_mcp(repo: &str) -> (PathBuf, Value) {
+    let path = PathBuf::from(repo).join(".mcp.json");
     let mut root: Value = if path.exists() {
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into()))
             .unwrap_or(Value::Object(Default::default()))
@@ -650,17 +808,48 @@ fn enable_search(repo: String) -> Result<String, String> {
     if !root.get("mcpServers").map(|v| v.is_object()).unwrap_or(false) {
         root["mcpServers"] = Value::Object(Default::default());
     }
+    (path, root)
+}
+
+#[tauri::command]
+fn enable_search(repo: String) -> Result<String, String> {
+    if !PathBuf::from(&repo).exists() {
+        return Err(format!("폴더가 없습니다: {repo}"));
+    }
+    let (path, mut root) = load_mcp(&repo);
     // context7: 공식 문서 검색, API 키 불필요
     root["mcpServers"]["context7"] = serde_json::json!({
         "command": "npx",
         "args": ["-y", "@upstash/context7-mcp"]
     });
-    std::fs::write(
-        &path,
-        serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
+    std::fs::write(&path, serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
     Ok("검색 켜짐: 공식 문서 검색(context7)을 연결했어요.".into())
+}
+
+// Exa 웹검색: 사용자 본인 키를 .mcp.json 에 등록(키가 비면 제거). 키는 사용자 소유물이다.
+#[tauri::command]
+fn set_exa_key(repo: String, key: String) -> Result<String, String> {
+    if !PathBuf::from(&repo).exists() {
+        return Err(format!("폴더가 없습니다: {repo}"));
+    }
+    let (path, mut root) = load_mcp(&repo);
+    if key.trim().is_empty() {
+        if let Some(servers) = root.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
+            servers.remove("exa");
+        }
+        std::fs::write(&path, serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+        return Ok("웹검색(Exa) 끔.".into());
+    }
+    root["mcpServers"]["exa"] = serde_json::json!({
+        "command": "npx",
+        "args": ["-y", "exa-mcp-server"],
+        "env": { "EXA_API_KEY": key.trim() }
+    });
+    std::fs::write(&path, serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    Ok("웹검색(Exa) 켜짐: 입력한 키로 연결했어요. (.mcp.json은 git에 올리지 마세요)".into())
 }
 
 #[tauri::command]
@@ -743,7 +932,10 @@ pub fn run() {
             set_cost_cap,
             get_cost_cap,
             enable_search,
-            disable_search
+            disable_search,
+            set_exa_key,
+            open_url,
+            restore_agents
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

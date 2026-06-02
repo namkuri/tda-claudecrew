@@ -11,3 +11,7 @@ Thumbs.db
 
 # logs
 *.log
+
+# MCP config may contain user API keys (Exa 등) — 올리지 않음
+.mcp.json
+.agentboard/

@@ -21,6 +21,14 @@ function makeDemoApi(){
     emit("agent_update", { ...a });
     setTimeout(() => { a.status = "running"; emit("agent_update", { ...a }); }, 400);
     sample.forEach((line, i) => setTimeout(() => emit("agent_output", { id, text: line }), 800 + i * 600));
+    if (args.team) {
+      // 팀 모드: 전문가들이 병렬로 일하는 모습 시뮬레이션
+      [["debugger","원인 분석"],["implementer","수정 구현"],["code-reviewer","검토"]].forEach(([n,d],i)=>{
+        setTimeout(()=>emit("teammate_update",{ agentId:id, name:n, desc:d, status:"working" }), 900 + i*500);
+        setTimeout(()=>emit("teammate_update",{ agentId:id, name:n, desc:d, status:"done" }), 1900 + i*500);
+      });
+    }
+    setTimeout(() => { a.port = 5173; emit("agent_update", { ...a }); }, 2200); // dev 서버 포트 감지 시뮬
     setTimeout(() => { a.status = "done"; a.cost = 0.0123; emit("agent_done", { ...a }); }, 800 + sample.length * 600 + 400);
     return Promise.resolve(id);
   }
@@ -131,6 +139,17 @@ $("#tglSearch").addEventListener("change", async (e) => {
   } catch (err) { alert("검색 설정 실패: " + err); e.target.checked = !e.target.checked; }
 });
 
+// "웹검색 키" → Exa API 키 입력(본인 키). 비우면 끄기.
+$("#btnExa").addEventListener("click", async () => {
+  if (!repoPath) { alert("먼저 폴더를 선택하세요."); return; }
+  const key = prompt("Exa 웹검색 API 키를 입력하세요(비우면 끄기). exa.ai 에서 발급받을 수 있어요:");
+  if (key === null) return;
+  try {
+    const r = await invoke("set_exa_key", { repo: repoPath, key: key || "" });
+    if (typeof r === "string" && !DEMO) showHint(r);
+  } catch (e) { alert("실패: " + e); }
+});
+
 function showHint(msg){
   const b = $("#costBanner");
   b.textContent = msg; b.classList.remove("hidden");
@@ -169,14 +188,25 @@ $("#btnRun").addEventListener("click", async () => {
 
 async function loadAgents(){
   try {
-    const list = await invoke("list_agents");
-    state.clear(); list.forEach(a => state.set(a.id, a)); render();
+    // 실제 폴더가 있으면 재시작 후에도 작업 공간을 복원(V1.3)
+    const useRestore = repoPath && !DEMO;
+    const list = await invoke(useRestore ? "restore_agents" : "list_agents", useRestore ? { repo: repoPath } : undefined);
+    if (Array.isArray(list)) { state.clear(); list.forEach(a => state.set(a.id, a)); render(); }
   } catch (_) {}
 }
 
 function costTotal(){
   let s = 0; state.forEach(a => { if (a.cost) s += a.cost; });
   return s;
+}
+
+// 팀 모드: 전문가별 진행을 칩으로
+function renderTeammates(a){
+  const t = a.teammates;
+  if (!t || !Object.keys(t).length) return "";
+  const chips = Object.entries(t).map(([name, st]) =>
+    `<span class="mate ${st}">${st === "done" ? "✓" : "●"} ${esc(name)}</span>`).join("");
+  return `<div class="mates">팀원 ${chips}</div>`;
 }
 
 function render(){
@@ -198,14 +228,18 @@ function render(){
         ${a.cost != null ? `<span class="cost">$${Number(a.cost).toFixed(4)}</span>` : ""}
       </div>
       <div class="ask">${esc(a.prompt)}</div>
+      ${renderTeammates(a)}
       <div class="log" id="log-${a.id}">${logHtml}</div>
       <div class="acts">
         <button data-act="diff">바뀐 점</button>
+        ${a.port ? `<button data-act="preview" class="primary">미리보기 :${a.port}</button>` : ""}
         <button data-act="apply" class="primary">적용하기</button>
         <button data-act="stop">멈추기</button>
         <button data-act="cleanup">되돌리기</button>
       </div>`;
     card.querySelector('[data-act="diff"]').onclick = () => viewDiff(a.id);
+    const previewBtn = card.querySelector('[data-act="preview"]');
+    if (previewBtn) previewBtn.onclick = () => invoke("open_url", { url: "http://localhost:" + a.port });
     card.querySelector('[data-act="apply"]').onclick = () => applyChanges(a.id);
     card.querySelector('[data-act="stop"]').onclick = () => invoke("stop_agent", { id: a.id });
     card.querySelector('[data-act="cleanup"]').onclick = () => {
@@ -304,6 +338,13 @@ listen("agent_output", (ev) => {
 });
 listen("agent_done", (ev) => { const a = ev.payload; const cur = state.get(a.id) || {}; state.set(a.id, { ...cur, ...a, output: cur.output || [] }); render(); });
 listen("agent_removed", (ev) => { state.delete(ev.payload.id); render(); });
+listen("teammate_update", (ev) => {
+  const { agentId, name, status } = ev.payload || {};
+  const a = state.get(agentId); if (!a) return;
+  a.teammates = a.teammates || {};
+  a.teammates[name] = status;
+  render();
+});
 listen("cost_capped", (ev) => {
   const { total, cap } = ev.payload || {};
   const b = $("#costBanner");

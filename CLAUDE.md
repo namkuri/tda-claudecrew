@@ -39,6 +39,7 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
 - `src-tauri/skills/<name>/SKILL.md` — 기본 스킬(`include_str!`로 포함, `~/.claude/skills/`에 기록)
 - `.github/workflows/{build,pages}.yml` — 클라우드 빌드(제어 정책 우회) + Pages 데모 배포
 - `docs/SETUP-GUIDE.md` — **사용자가 직접 할 일**(git init·push, Pages/Actions 켜기, 설치파일 내려받기)
+- `docs/RUN-AND-TEST.md` — **데스크톱 앱 실행·기능별 테스트 시나리오**(온보딩~미리보기·팀·검색·복원까지)
 - `claudecrew-plugin/` — 전문가·스킬·훅·MCP를 한 덩어리로 묶은 배포용 플러그인(부록A 8)
 - `src-tauri/tauri.conf.json` — 창/번들/아이콘/`frontendDist: ../ui`
 - `src-tauri/capabilities/default.json` — dialog/opener 권한
@@ -56,6 +57,10 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
 - **레시피 6종(v0.3)**: 버그/기능/설명/테스트/정리·리팩터/코드검토 → 각자 전문가·모드 매핑.
 - **팀 오케스트레이션(v0.3)**: "팀에게 맡기기" 토글 → 팀장이 전문가들에게 위임하는 프롬프트로 실행.
 - **플러그인 패키징(v0.3)**: `claudecrew-plugin/`(.claude-plugin/plugin.json + hooks.json + .mcp.json) — 배포용 한 덩어리.
+- **미리보기 포트(V1.2)**: `run_agent`가 출력에서 `localhost:포트` 감지 → `AgentInfo.port` → 카드 "미리보기" 버튼 → `open_url`(opener).
+- **팀 병렬 시각화**: `run_agent`가 Task(서브에이전트) tool_use/tool_result 추적 → `teammate_update` 이벤트 → 카드에 전문가별 ●/✓ 칩.
+- **Exa 웹검색 키**: `set_exa_key(repo,key)` → `.mcp.json`에 exa 서버(env EXA_API_KEY, 사용자 본인 키). UI "웹검색 키" 버튼. `.mcp.json`은 .gitignore.
+- **작업 공간 복원(V1.3)**: `restore_agents(repo)` — `git worktree list`로 `.agentboard/` 작업 복원. 시작 시 호출.
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.
