@@ -741,6 +741,119 @@ fn note_port(app: &AppHandle, id: &str, line: &str) {
     }
 }
 
+// ---------------- 커맨드: Claude Code 사용량 통계 ----------------
+// `~/.claude/stats-cache.json` 을 읽어 누적 토큰/모델/일별 활동을 돌려준다.
+// Claude Code(`/usage`)가 보여주는 것과 동일한 로컬 캐시.
+#[derive(Clone, Serialize, Default)]
+struct UsageStats {
+    available: bool,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_tokens: u64,
+    cache_creation_tokens: u64,
+    cost_usd: f64,
+    total_sessions: u64,
+    total_messages: u64,
+    today_messages: u64,    // 오늘(YYYY-MM-DD) 메시지 수
+    today_tokens: u64,      // 오늘 모델별 합계
+    week_messages: u64,     // 최근 7일 메시지 수
+    week_tokens: u64,
+    models: Vec<String>,    // 사용된 모델 목록
+    last_computed: String,  // stats-cache의 lastComputedDate
+}
+
+fn today_iso() -> String {
+    // Date를 못 쓰는 환경에서도 안전하게 — std::time + chrono 없이 직접 계산
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
+    let days = secs / 86400;
+    // 1970-01-01 부터 days. 그레고리력 계산(간단판).
+    let mut y = 1970i64; let mut d = days;
+    loop { let leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0); let yd = if leap {366} else {365};
+        if d >= yd { d -= yd; y += 1; } else { break; }
+    }
+    let mdays = [31,28,31,30,31,30,31,31,30,31,30,31];
+    let leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+    let mut m = 0usize;
+    loop {
+        let dm = mdays[m] + if leap && m == 1 {1} else {0};
+        if d >= dm as i64 { d -= dm as i64; m += 1; } else { break; }
+    }
+    format!("{:04}-{:02}-{:02}", y, m + 1, d + 1)
+}
+
+#[tauri::command]
+fn read_usage() -> UsageStats {
+    let mut out = UsageStats::default();
+    let home = std::env::var("USERPROFILE").ok().or_else(|| std::env::var("HOME").ok());
+    let Some(home) = home.map(PathBuf::from) else { return out };
+    let path = home.join(".claude").join("stats-cache.json");
+    let Ok(text) = std::fs::read_to_string(&path) else { return out };
+    let Ok(v): Result<Value, _> = serde_json::from_str(&text) else { return out };
+
+    // 모델별 합계
+    if let Some(usage) = v.get("modelUsage").and_then(|x| x.as_object()) {
+        for (name, m) in usage {
+            out.models.push(name.clone());
+            let g = |k: &str| m.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+            out.input_tokens += g("inputTokens");
+            out.output_tokens += g("outputTokens");
+            out.cache_read_tokens += g("cacheReadInputTokens");
+            out.cache_creation_tokens += g("cacheCreationInputTokens");
+            out.cost_usd += m.get("costUSD").and_then(|x| x.as_f64()).unwrap_or(0.0);
+        }
+    }
+    out.total_sessions = v.get("totalSessions").and_then(|x| x.as_u64()).unwrap_or(0);
+    out.total_messages = v.get("totalMessages").and_then(|x| x.as_u64()).unwrap_or(0);
+    out.last_computed = v.get("lastComputedDate").and_then(|x| x.as_str()).unwrap_or("").to_string();
+
+    // 오늘/주간
+    let today = today_iso();
+    if let Some(arr) = v.get("dailyActivity").and_then(|x| x.as_array()) {
+        for d in arr {
+            let date = d.get("date").and_then(|x| x.as_str()).unwrap_or("");
+            let mc = d.get("messageCount").and_then(|x| x.as_u64()).unwrap_or(0);
+            if date == today { out.today_messages += mc; }
+            if date >= today.as_str() || cmp_recent7(date, &today) { out.week_messages += mc; }
+        }
+    }
+    if let Some(arr) = v.get("dailyModelTokens").and_then(|x| x.as_array()) {
+        for d in arr {
+            let date = d.get("date").and_then(|x| x.as_str()).unwrap_or("");
+            let tok: u64 = d.get("tokensByModel").and_then(|x| x.as_object())
+                .map(|o| o.values().filter_map(|v| v.as_u64()).sum()).unwrap_or(0);
+            if date == today { out.today_tokens += tok; }
+            if cmp_recent7(date, &today) { out.week_tokens += tok; }
+        }
+    }
+
+    out.available = true;
+    out
+}
+
+// 두 YYYY-MM-DD 문자열을 비교해 src가 today 기준 최근 7일 이내인지(같은 날 포함).
+fn cmp_recent7(src: &str, today: &str) -> bool {
+    fn ymd(s: &str) -> Option<(i64, u32, u32)> {
+        let mut p = s.split('-');
+        Some((p.next()?.parse().ok()?, p.next()?.parse().ok()?, p.next()?.parse().ok()?))
+    }
+    fn to_days(y: i64, m: u32, d: u32) -> i64 {
+        // 1970-01-01 부터의 일수(근사 — 비교용이라 충분).
+        let mut total: i64 = 0;
+        for yy in 1970..y {
+            let leap = (yy % 4 == 0 && yy % 100 != 0) || (yy % 400 == 0);
+            total += if leap {366} else {365};
+        }
+        let mdays = [31,28,31,30,31,30,31,31,30,31,30,31];
+        let leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+        for mm in 1..m { total += mdays[(mm - 1) as usize] as i64 + if leap && mm == 2 {1} else {0}; }
+        total + (d as i64 - 1)
+    }
+    let (Some(a), Some(b)) = (ymd(src), ymd(today)) else { return false };
+    let da = to_days(a.0, a.1, a.2); let db = to_days(b.0, b.1, b.2);
+    db - da >= 0 && db - da < 7
+}
+
 // ---------------- 커맨드: API 모드 감지 (안전: 키를 저장/취급하지 않음) ----------------
 // 환경에 ANTHROPIC_API_KEY 가 이미 있으면 Claude Code가 API 경로로 인증한다.
 // 우리는 그 사실만 읽어 UI에 표시할 뿐, 키를 만들거나 저장하지 않는다(안전 원칙 1장).
@@ -1113,7 +1226,8 @@ pub fn run() {
             disable_lsp,
             open_url,
             restore_agents,
-            check_api_mode
+            check_api_mode,
+            read_usage
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

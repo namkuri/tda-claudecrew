@@ -66,8 +66,9 @@ const I18N = {
     tokenSrc: "토큰", tokenSub: "구독 플랜", tokenApi: "API 키", tokenTitle: "어떤 토큰으로 청구할지 — 구독(앱 플랜) 또는 API 키",
     composerHint: "무엇을 원하는지 적기만 하면, 알아서 전문가와 스킬을 골라 처리해요. (아래 템플릿은 선택)",
     quickTpl: "빠른 템플릿 (선택)",
-    sbSession: "세션", sbWeek: "주간 누적", sbCtx: "현재 작업 컨텍스트", sbUsedSub: "구독 사용량", sbUsedApi: "API 사용량",
-    sbNote: "ⓘ", sbNoteTitle: "Claude Code는 구독 잔여 한도를 외부로 알려주지 않아, '사용한' 토큰을 표시합니다. 주간 누적은 이 앱이 완료된 작업 기준으로 합산합니다.",
+    sbSession: "세션", sbToday: "오늘", sbWeek: "최근 7일", sbCtx: "현재 작업 컨텍스트", sbUsedSub: "구독 사용량", sbUsedApi: "API 사용량",
+    sbMsg: "건", sbNote: "ⓘ", sbNoteTitle: "Claude Code 로컬 캐시(~/.claude/stats-cache.json)에서 누적 사용량을 읽어 표시합니다. /usage 화면과 같은 출처예요. 구독 '남은 한도'는 Claude Code가 외부 노출하지 않습니다.",
+    sbSrcTitle: "데이터 출처: Claude Code stats-cache 또는 이 앱의 자체 집계",
   },
   en: {
     lead: "The easiest way to hand work to a team of AI experts.<br/>Just 3 steps to get started!",
@@ -127,8 +128,9 @@ const I18N = {
     tokenSrc: "Tokens", tokenSub: "Subscription", tokenApi: "API key", tokenTitle: "Which tokens to bill — your subscription (app plan) or an API key",
     composerHint: "Just write what you want — it picks the right experts and skills for you. (Templates below are optional.)",
     quickTpl: "Quick templates (optional)",
-    sbSession: "Session", sbWeek: "This week", sbCtx: "Current task context", sbUsedSub: "Subscription usage", sbUsedApi: "API usage",
-    sbNote: "ⓘ", sbNoteTitle: "Claude Code doesn't expose remaining subscription quota, so this shows tokens USED. Weekly total is summed by this app over finished tasks.",
+    sbSession: "Session", sbToday: "Today", sbWeek: "Last 7d", sbCtx: "Current task context", sbUsedSub: "Subscription usage", sbUsedApi: "API usage",
+    sbMsg: "msgs", sbNote: "ⓘ", sbNoteTitle: "Pulled from Claude Code's local cache (~/.claude/stats-cache.json) — same source as the /usage screen. Remaining subscription quota isn't exposed by Claude Code.",
+    sbSrcTitle: "Data source: Claude Code stats-cache, or this app's own tally",
   },
 };
 let lang = localStorage.getItem("cc_lang") || "ko";
@@ -186,6 +188,7 @@ function makeDemoApi(){
   }
   const invoke = (cmd, args = {}) => {
     switch (cmd){
+      case "read_usage":        return Promise.resolve({ available:true, today_tokens:185000, week_tokens:1240000, today_messages:42, week_messages:286, total_messages:1320, total_sessions:18, models:["claude-sonnet-4-6","claude-opus-4-7"] });
       case "check_claude":      return Promise.resolve(t("demoCheck"));
       case "setup_environment": return Promise.resolve(t("demoSetup"));
       case "get_cost_cap":      return Promise.resolve(5);
@@ -301,6 +304,9 @@ function enterApp(){
   invoke("get_cost_cap").then(v => { if (v != null) $("#costCap").value = v; }).catch(()=>{});
   syncTokenSeg();
   showComposer();
+  // Claude Code 사용량(stats-cache) 동기화 — 즉시 + 15초 주기
+  refreshUsage();
+  if (!window.__usageTimer) window.__usageTimer = setInterval(refreshUsage, 15000);
 }
 
 // 토큰 소스 세그먼트(구독/API) 동기화 + 전환
@@ -526,21 +532,38 @@ let weekData; try { weekData = JSON.parse(localStorage.getItem("cc_week")||"{}")
 if (weekData.key !== weekKey()) weekData = { key: weekKey(), tokens: 0, ids: [] };
 function addWeekly(id, tok){ if (!tok || weekData.ids.includes(id)) return; weekData.ids.push(id); weekData.tokens += tok; localStorage.setItem("cc_week", JSON.stringify(weekData)); }
 
+// Claude Code 통계 캐시 — read_usage 결과(주기 갱신)
+let usageStats = { available: false, today_tokens: 0, week_tokens: 0, today_messages: 0, week_messages: 0,
+                   total_messages: 0, total_sessions: 0, models: [] };
+async function refreshUsage(){
+  try { const u = await invoke("read_usage"); if (u) usageStats = u; }
+  catch(_){ /* DEMO에서는 없음 */ }
+  renderStatusbar();
+}
+
 function renderStatusbar(){
   const bar = $("#statusbar"); if (!bar) return;
+  // 세션(이 앱이 실행한 작업) — 우리가 본 입력/출력 토큰
   let tin = 0, tout = 0; state.forEach(a => { tin += a.tokens_in || 0; tout += a.tokens_out || 0; });
   const usedLabel = authMode === "api" ? t("sbUsedApi") : t("sbUsedSub");
   const sel = (selectedId && state.has(selectedId)) ? state.get(selectedId) : null;
   const ctx = sel && sel.ctx ? sel.ctx : 0;
   const pct = Math.min(100, Math.round(ctx / CTX_WINDOW * 100));
   const ctxCls = pct >= 90 ? "full" : (pct >= 70 ? "warn" : "");
+  // 오늘/주간: Claude Code stats-cache 우선, 없으면 앱 누적값 fallback
+  const todayTok = usageStats.available ? usageStats.today_tokens : 0;
+  const weekTok = usageStats.available ? usageStats.week_tokens : weekData.tokens;
+  const todayMsg = usageStats.available ? usageStats.today_messages : 0;
+  const src = usageStats.available ? "Claude Code" : "local";
   bar.innerHTML =
     `<span class="sb-seg" title="${esc(t("sbNoteTitle"))}">${usedLabel} ${t("sbNote")}</span>
      <span class="sb-sep">·</span>
      <span class="sb-seg">${t("sbSession")}: <span class="up">↑${fmtTok(tin)}</span> <span class="down">↓${fmtTok(tout)}</span> <b>${fmtTok(tin + tout)}</b></span>
      <span class="sb-sep">·</span>
-     <span class="sb-seg">${t("sbWeek")}: <b>${fmtTok(weekData.tokens)}</b></span>
-     <span class="sb-seg sb-ctx">${t("sbCtx")}: <b>${fmtTok(ctx)}</b> / ${fmtTok(CTX_WINDOW)} (${pct}%) <span class="ctxbar"><i class="${ctxCls}" style="width:${pct}%"></i></span></span>`;
+     <span class="sb-seg">${t("sbToday")}: <b>${fmtTok(todayTok)}</b>${todayMsg ? ` <span class="sb-note">(${todayMsg} ${t("sbMsg")})</span>` : ""}</span>
+     <span class="sb-sep">·</span>
+     <span class="sb-seg">${t("sbWeek")}: <b>${fmtTok(weekTok)}</b></span>
+     <span class="sb-seg sb-ctx">${t("sbCtx")}: <b>${fmtTok(ctx)}</b> / ${fmtTok(CTX_WINDOW)} (${pct}%) <span class="ctxbar"><i class="${ctxCls}" style="width:${pct}%"></i></span><span class="sb-src" title="${esc(t("sbSrcTitle"))}">${src}</span></span>`;
 }
 
 // 팀원 데이터 정규화: {status} 문자열 또는 {status,desc,result} 객체 모두 허용

@@ -94,7 +94,8 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - "+새 작업" 수정(컴포저 복귀+프롬프트 초기화+포커스).
 - **사용성 수정(v0.8.1)**:
   - **오케스트레이션 프롬프트 버그 수정**: 지시문이 앞에 길게 깔려 요청이 묻혀 모델이 "요청이 비었다"며 되묻던 문제 → **사용자 요청을 맨 앞에 두고 안내는 짧게 뒤로**. (team/agent/auto 세 분기 모두)
-  - **토큰/컨텍스트 상태바(최하단)**: `usage_of`로 stream-json의 `usage`(input/output/cache) 추출 → AgentInfo.tokens_in/out/ctx. 상태바에 **세션 ↑/↓ 합계 · 주간 누적(localStorage, 완료 작업 기준) · 현재 작업 컨텍스트(토큰/200k % + 막대)**. 구독 잔여 한도는 Claude Code가 비공개라 '사용량'으로 표기(ⓘ 안내).
+  - **토큰/컨텍스트 상태바(최하단)**: `usage_of`로 stream-json의 `usage`(input/output/cache) 추출 → AgentInfo.tokens_in/out/ctx. 상태바에 **세션 ↑/↓ 합계 · 오늘/최근7일(Claude Code stats-cache) · 현재 작업 컨텍스트(토큰/200k % + 막대)**. 구독 잔여 한도는 Claude Code가 비공개라 '사용량'으로 표기(ⓘ 안내).
+  - **read_usage 커맨드(v0.8.2)**: `~/.claude/stats-cache.json`(Claude Code `/usage` 화면의 원본)을 읽어 `UsageStats`(모델별 합계 · 오늘/주간 토큰·메시지·세션 수)로 반환. 15초 주기 갱신. 상태바에 "Claude Code" 출처 배지.
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.

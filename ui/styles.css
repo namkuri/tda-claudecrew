@@ -284,3 +284,4 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .statusbar .ctxbar i{display:block;height:100%;background:var(--accent)}
 .statusbar .ctxbar i.warn{background:var(--run)} .statusbar .ctxbar i.full{background:var(--err)}
 .statusbar .sb-note{color:var(--faint);cursor:help}
+.statusbar .sb-src{margin-left:8px;color:var(--faint);font-size:10px;border:1px solid var(--line);border-radius:999px;padding:1px 7px;cursor:help}
