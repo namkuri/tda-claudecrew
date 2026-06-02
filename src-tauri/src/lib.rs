@@ -427,10 +427,11 @@ librarian 검색, implementer 구현, debugger 디버깅, code-reviewer 검토)�
         }
     };
 
-    // 무거운 작업은 별도 스레드에서
+    // 무거운 작업은 별도 스레드에서 (id는 반환에도 쓰므로 복제해서 넘김)
     let app2 = app.clone();
+    let id_for_thread = id.clone();
     std::thread::spawn(move || {
-        run_agent(app2, id, repo, effective_prompt, model, permission, branch, worktree, keepgoing);
+        run_agent(app2, id_for_thread, repo, effective_prompt, model, permission, branch, worktree, keepgoing);
     });
 
     Ok(id)
@@ -502,7 +503,8 @@ fn run_agent(
     // pid 저장 (중지용)
     {
         let state = app.state::<AppState>();
-        if let Some(a) = state.agents.lock().unwrap().get_mut(&id) {
+        let mut agents = state.agents.lock().unwrap();
+        if let Some(a) = agents.get_mut(&id) {
             a.pid = Some(child.id());
         }
     }
@@ -537,7 +539,8 @@ fn run_agent(
                         if let Some(cost) = evt.get("total_cost_usd").and_then(|v| v.as_f64()) {
                             {
                                 let state = app.state::<AppState>();
-                                if let Some(a) = state.agents.lock().unwrap().get_mut(&id) {
+                                let mut agents = state.agents.lock().unwrap();
+                                if let Some(a) = agents.get_mut(&id) {
                                     a.cost = Some(cost);
                                 }
                             }
@@ -557,9 +560,10 @@ fn run_agent(
 
     let ok = child.wait().map(|s| s.success()).unwrap_or(false);
     set_status(&app, &id, if ok { "done" } else { "error" });
-    // done 이벤트(비용 포함)
+    // done 이벤트(비용 포함) — 가드를 명명해 state보다 먼저 drop되게 한다
     let state = app.state::<AppState>();
-    if let Some(a) = state.agents.lock().unwrap().get(&id) {
+    let agents = state.agents.lock().unwrap();
+    if let Some(a) = agents.get(&id) {
         let _ = app.emit("agent_done", a.clone());
     }
 }
@@ -655,14 +659,18 @@ fn note_port(app: &AppHandle, id: &str, line: &str) {
     if let Some(p) = detect_port(line) {
         let state = app.state::<AppState>();
         let mut changed = false;
-        if let Some(a) = state.agents.lock().unwrap().get_mut(id) {
-            if a.port.is_none() {
-                a.port = Some(p);
-                changed = true;
+        {
+            let mut agents = state.agents.lock().unwrap();
+            if let Some(a) = agents.get_mut(id) {
+                if a.port.is_none() {
+                    a.port = Some(p);
+                    changed = true;
+                }
             }
-        }
+        } // 가드를 먼저 풀어 아래 재잠금과의 데드락 방지
         if changed {
-            if let Some(a) = state.agents.lock().unwrap().get(id) {
+            let agents = state.agents.lock().unwrap();
+            if let Some(a) = agents.get(id) {
                 let _ = app.emit("agent_update", a.clone());
             }
         }
@@ -692,7 +700,8 @@ fn open_url(app: AppHandle, url: String) -> Result<(), String> {
 #[tauri::command]
 fn list_agents(app: AppHandle) -> Vec<AgentInfo> {
     let state = app.state::<AppState>();
-    state.agents.lock().unwrap().values().cloned().collect()
+    let agents = state.agents.lock().unwrap();
+    agents.values().cloned().collect()
 }
 
 // ---------------- 커맨드: 작업 공간 복원 ----------------
