@@ -133,10 +133,12 @@
 
 ---
 
-## 마일스톤 v2 — "고도화"
-### [x] V2.1 레시피 마켓/공유 — 커스텀 레시피 localStorage + 내보내기/가져오기(JSON). 데모 검증.
-### [~] V2.2 LSP·정밀편집(MCP) — 검색 MCP(context7/Exa) 완료, LSP 남음
-### [~] V2.3 API 자동 전환 — 동시 3개+ 시 'API 권장' 힌트 완료. 실제 API 경로 자동 전환은 남음.
+## 마일스톤 v2 — "고도화"  ✅ 대부분 완료 (v0.6)
+### [x] V2.1 레시피 마켓/공유 — 커스텀 레시피 localStorage + 내보내기/가져오기(JSON) + 인앱 편집기. 데모 검증.
+### [x] V2.2 LSP·정밀편집(MCP) — precise-edit 스킬 + enable_lsp(serena 시맨틱 MCP) + UI 토글. 검색 MCP(context7/Exa) 포함.
+### [~] V2.3 API 자동 전환 — 'API 권장' 힌트 + `check_api_mode`로 환경 API 키 감지/표시 완료. **키 저장은 안전원칙상 미구현**(Claude Code가 인증 담당).
+### [x] V2.4 다국어 — KO/EN i18n + 언어 토글. 데모 검증.
+### [ ] V2.5 플러그인 번들 배포 — 구조+빌드 스크립트(build-plugin.mjs) 완료, 실제 마켓 게시는 남음.
 ### [ ] V2.4 다국어  ### [ ] V2.5 플러그인 번들 배포(.claude-plugin)
 
 ---

@@ -41,6 +41,7 @@ header{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:
 .meter{font-size:12px;color:var(--dim)} .meter b{color:var(--accent)}
 .meter b.warn{color:var(--run)}
 .api-hint{font-size:11px;color:var(--run);border:1px solid var(--run);border-radius:999px;padding:3px 10px}
+.api-mode{font-size:11px;color:var(--done);border:1px solid var(--accent-d);border-radius:999px;padding:3px 10px}
 .capctl{font-size:12px;color:var(--dim)}
 .capctl input{width:64px;background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-family:var(--font);margin-left:4px}
 .banner{margin:0;padding:11px 20px;background:rgba(255,180,84,.14);border-bottom:1px solid var(--run);color:var(--run);font-size:13px}
@@ -108,3 +109,12 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .diff-file-h .fname{font-family:var(--mono);font-size:12px;color:var(--ink);flex:1;word-break:break-all}
 .diff-file-h .fcount{font-family:var(--mono);font-size:11px}
 .diff-file-b{margin:0;padding:12px 14px;border-top:1px solid var(--line);background:#0b0e11;overflow:auto;font-family:var(--mono);font-size:12px;line-height:1.5}
+
+/* 레시피 만들기 모달 */
+.sheet-sm{width:min(520px,100%)}
+.form{padding:16px;display:flex;flex-direction:column;gap:12px;overflow:auto}
+.form label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--dim)}
+.form input,.form textarea,.form select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:var(--font);font-size:13px}
+.form textarea{min-height:64px;resize:vertical}
+.form-acts{display:flex;gap:10px;margin-top:4px}
+.form-acts .btn{flex:none} #rfDelete{color:var(--err);border-color:var(--err)}

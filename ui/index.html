@@ -12,14 +12,14 @@
 <div id="onboarding" class="overlay">
   <div class="wizard">
     <div class="brand">Claude<b>Crew</b></div>
-    <p class="lead">AI 전문가 팀에게 일을 맡기는 가장 쉬운 길.<br/>3단계만 따라오면 준비 끝!</p>
+    <p class="lead" data-i18n-html="lead">AI 전문가 팀에게 일을 맡기는 가장 쉬운 길.<br/>3단계만 따라오면 준비 끝!</p>
 
     <div class="step" id="step1">
       <div class="num">1</div>
       <div class="body">
-        <h3>Claude 준비 확인</h3>
-        <p class="muted">컴퓨터에 Claude Code가 설치·로그인되어 있는지 확인해요.</p>
-        <button class="btn" id="btnCheck">확인하기</button>
+        <h3 data-i18n="step1_h">Claude 준비 확인</h3>
+        <p class="muted" data-i18n="step1_p">컴퓨터에 Claude Code가 설치·로그인되어 있는지 확인해요.</p>
+        <button class="btn" id="btnCheck" data-i18n="btnCheck">확인하기</button>
         <span class="status" id="checkStatus"></span>
       </div>
     </div>
@@ -27,9 +27,9 @@
     <div class="step" id="step2">
       <div class="num">2</div>
       <div class="body">
-        <h3>작업할 폴더 고르기</h3>
-        <p class="muted">AI가 작업할 프로젝트 폴더를 골라요.</p>
-        <button class="btn" id="btnFolder">폴더 선택</button>
+        <h3 data-i18n="step2_h">작업할 폴더 고르기</h3>
+        <p class="muted" data-i18n="step2_p">AI가 작업할 프로젝트 폴더를 골라요.</p>
+        <button class="btn" id="btnFolder" data-i18n="btnFolder">폴더 선택</button>
         <span class="status" id="folderStatus"></span>
       </div>
     </div>
@@ -37,14 +37,14 @@
     <div class="step" id="step3">
       <div class="num">3</div>
       <div class="body">
-        <h3>준비 완료</h3>
-        <p class="muted">전문가 팀을 설치하고 안전 설정을 켜요. (자동)</p>
-        <button class="btn" id="btnSetup">전문가 설치</button>
+        <h3 data-i18n="step3_h">준비 완료</h3>
+        <p class="muted" data-i18n="step3_p">전문가 팀을 설치하고 안전 설정을 켜요. (자동)</p>
+        <button class="btn" id="btnSetup" data-i18n="btnSetup">전문가 설치</button>
         <span class="status" id="setupStatus"></span>
       </div>
     </div>
 
-    <button class="btn go" id="btnStart" disabled>시작하기 →</button>
+    <button class="btn go" id="btnStart" disabled data-i18n="btnStart">시작하기 →</button>
   </div>
 </div>
 
@@ -52,66 +52,105 @@
 <div id="app" class="hidden">
   <header>
     <div class="brand sm">Claude<b>Crew</b></div>
-    <div class="folder" id="folderLabel">폴더 없음</div>
-    <button class="chip" id="btnChangeFolder">폴더 변경</button>
+    <div class="folder" id="folderLabel" data-i18n="noFolder">폴더 없음</div>
+    <button class="chip" id="btnChangeFolder" data-i18n="changeFolder">폴더 변경</button>
     <div class="spacer"></div>
-    <label class="capctl" title="이번 세션 비용이 이 금액에 닿으면 진행 중인 작업을 자동으로 멈춰요">상한 $<input id="costCap" type="number" min="0" step="0.5" value="5" /></label>
-    <div class="meter" title="이번 세션 예상 사용량">사용량 <b id="costTotal">$0.00</b></div>
-    <span id="apiHint" class="api-hint hidden" title="여러 작업을 동시에 돌리면 구독 한도를 빨리 써요">⚡ 많이 쓰는 중 — API 키 연결을 권해요</span>
+    <button class="chip" id="btnLang" title="언어 / Language">EN</button>
+    <label class="capctl" data-i18n-title="capTitle" title="이번 세션 비용이 이 금액에 닿으면 진행 중인 작업을 자동으로 멈춰요"><span data-i18n="cap">상한 $</span><input id="costCap" type="number" min="0" step="0.5" value="5" /></label>
+    <div class="meter" data-i18n-title="usageTitle" title="이번 세션 예상 사용량"><span data-i18n="usage">사용량 </span><b id="costTotal">$0.00</b></div>
+    <span id="apiHint" class="api-hint hidden" data-i18n-title="apiHintTitle" data-i18n="apiHint" title="여러 작업을 동시에 돌리면 구독 한도를 빨리 써요">⚡ 많이 쓰는 중 — API 키 연결을 권해요</span>
+    <span id="apiMode" class="api-mode hidden" data-i18n-title="apiModeTitle" data-i18n="apiMode" title="환경에 API 키가 설정되어 API 경로로 동작 중이에요">✓ API 모드</span>
   </header>
 
   <div id="costBanner" class="banner hidden"></div>
 
   <section class="composer">
     <div class="recipes">
-      <button class="recipe" data-r="bug">🐞 버그 고치기</button>
-      <button class="recipe" data-r="feature">✨ 기능 추가</button>
-      <button class="recipe" data-r="explain">📖 코드 설명</button>
-      <button class="recipe" data-r="test">🧪 테스트 만들기</button>
-      <button class="recipe" data-r="cleanup">🧹 정리·리팩터링</button>
-      <button class="recipe" data-r="review">🔍 코드 검토</button>
-      <button class="recipe" data-r="plan">🧠 계획 세우기</button>
-      <button class="recipe" data-r="security">🛡️ 보안 점검</button>
+      <button class="recipe" data-r="bug" data-i18n="r_bug">🐞 버그 고치기</button>
+      <button class="recipe" data-r="feature" data-i18n="r_feature">✨ 기능 추가</button>
+      <button class="recipe" data-r="explain" data-i18n="r_explain">📖 코드 설명</button>
+      <button class="recipe" data-r="test" data-i18n="r_test">🧪 테스트 만들기</button>
+      <button class="recipe" data-r="cleanup" data-i18n="r_cleanup">🧹 정리·리팩터링</button>
+      <button class="recipe" data-r="review" data-i18n="r_review">🔍 코드 검토</button>
+      <button class="recipe" data-r="plan" data-i18n="r_plan">🧠 계획 세우기</button>
+      <button class="recipe" data-r="security" data-i18n="r_security">🛡️ 보안 점검</button>
+      <button class="recipe" data-r="gate" data-i18n="r_gate">🚦 배포 전 검토</button>
     </div>
     <div class="recipe-tools">
-      <button class="linkbtn" id="recipeExport" title="레시피 묶음을 파일로 내보내요">↧ 레시피 내보내기</button>
-      <button class="linkbtn" id="recipeImport" title="공유받은 레시피 묶음(JSON)을 추가해요">↥ 레시피 가져오기</button>
+      <button class="linkbtn" id="recipeNew" data-i18n="recipeNew">＋ 레시피 만들기</button>
+      <button class="linkbtn" id="recipeExport" data-i18n-title="exportTitle" title="레시피 묶음을 파일로 내보내요" data-i18n="recipeExport">↧ 레시피 내보내기</button>
+      <button class="linkbtn" id="recipeImport" data-i18n-title="importTitle" title="공유받은 레시피 묶음(JSON)을 추가해요" data-i18n="recipeImport">↥ 레시피 가져오기</button>
     </div>
-    <textarea id="prompt" placeholder="무엇을 부탁할까요? 예) 로그인 버튼이 안 눌려요. 고쳐주세요."></textarea>
+    <textarea id="prompt" data-i18n-ph="promptPh" placeholder="무엇을 부탁할까요? 예) 로그인 버튼이 안 눌려요. 고쳐주세요."></textarea>
     <div class="controls">
-      <label>꼼꼼함
+      <label><span data-i18n="speedLabel">꼼꼼함</span>
         <select id="speed">
-          <option value="haiku">빠르게</option>
-          <option value="sonnet" selected>보통</option>
-          <option value="opus">꼼꼼하게</option>
+          <option value="haiku" data-i18n="speedFast">빠르게</option>
+          <option value="sonnet" selected data-i18n="speedNormal">보통</option>
+          <option value="opus" data-i18n="speedCareful">꼼꼼하게</option>
         </select>
       </label>
-      <label class="toggle" title="멈추지 않고 끝까지 하도록 한 번 더 점검해요"><input type="checkbox" id="tglKeep"> 끝까지 모드</label>
-      <label class="toggle" title="공식 문서 검색(context7)을 켜요"><input type="checkbox" id="tglSearch"> 검색 켜기</label>
-      <button class="linkbtn" id="btnExa" title="웹검색(Exa) API 키 입력 — 본인 키만 사용">웹검색 키</button>
-      <label class="toggle" title="팀장이 전문가들에게 나눠 맡겨요"><input type="checkbox" id="tglTeam"> 팀에게 맡기기</label>
-      <label class="safe" title="AI가 어디까지 할 수 있는지 정해요">🔒 안전
+      <label class="toggle" data-i18n-title="keepTitle" title="멈추지 않고 끝까지 하도록 한 번 더 점검해요"><input type="checkbox" id="tglKeep"> <span data-i18n="keepMode">끝까지 모드</span></label>
+      <label class="toggle" data-i18n-title="searchTitle" title="공식 문서 검색(context7)을 켜요"><input type="checkbox" id="tglSearch"> <span data-i18n="searchOn">검색 켜기</span></label>
+      <button class="linkbtn" id="btnExa" data-i18n-title="exaTitle" title="웹검색(Exa) API 키 입력 — 본인 키만 사용" data-i18n="exaKey">웹검색 키</button>
+      <label class="toggle" data-i18n-title="teamTitle" title="팀장이 전문가들에게 나눠 맡겨요"><input type="checkbox" id="tglTeam"> <span data-i18n="teamMode">팀에게 맡기기</span></label>
+      <label class="toggle" data-i18n-title="lspTitle" title="LSP 기반 정밀 편집 도구(MCP)를 켜요"><input type="checkbox" id="tglLsp"> <span data-i18n="lspMode">정밀 편집</span></label>
+      <label class="safe" data-i18n-title="safetyTitle" title="AI가 어디까지 할 수 있는지 정해요"><span data-i18n="safeLock">🔒 안전</span>
         <select id="safety">
-          <option value="acceptEdits" selected>이 폴더만</option>
-          <option value="plan">읽기만</option>
-          <option value="bypassPermissions">전체 허용</option>
+          <option value="acceptEdits" selected data-i18n="safeFolder">이 폴더만</option>
+          <option value="plan" data-i18n="safeRead">읽기만</option>
+          <option value="bypassPermissions" data-i18n="safeFull">전체 허용</option>
         </select>
       </label>
-      <button class="btn go" id="btnRun">▶ 전문가에게 맡기기</button>
+      <button class="btn go" id="btnRun" data-i18n="run">▶ 전문가에게 맡기기</button>
     </div>
   </section>
 
   <main id="board">
-    <div class="empty" id="emptyMsg">아직 맡긴 일이 없어요. 위에서 레시피를 고르거나 부탁을 적고 ▶ 를 눌러보세요.</div>
+    <div class="empty" id="emptyMsg" data-i18n="empty">아직 맡긴 일이 없어요. 위에서 레시피를 고르거나 부탁을 적고 ▶ 를 눌러보세요.</div>
   </main>
 </div>
 
 <!-- 바뀐 점 -->
 <div class="overlay hidden" id="diffModal">
   <div class="sheet">
-    <div class="sheet-h"><b id="diffTitle">바뀐 점</b><span class="x" id="diffClose">✕ 닫기</span></div>
+    <div class="sheet-h"><b id="diffTitle" data-i18n="diffTitle">바뀐 점</b><span class="x" id="diffClose" data-i18n="diffClose">✕ 닫기</span></div>
     <div id="diffSummary" class="diff-summary"></div>
     <div id="diffBody" class="diff-files"></div>
+  </div>
+</div>
+
+<!-- 레시피 만들기 -->
+<div class="overlay hidden" id="recipeModal">
+  <div class="sheet sheet-sm">
+    <div class="sheet-h"><b data-i18n="recipeNewTitle">새 레시피 만들기</b><span class="x" id="recipeModalClose" data-i18n="diffClose">✕ 닫기</span></div>
+    <div class="form">
+      <label><span data-i18n="rfName">이름</span><input id="rfName" type="text" placeholder="예: DB 마이그레이션" /></label>
+      <label><span data-i18n="rfEmoji">이모지</span><input id="rfEmoji" type="text" maxlength="2" placeholder="🗄️" /></label>
+      <label><span data-i18n="rfText">부탁 문구</span><textarea id="rfText" placeholder="예: DB 스키마를 안전하게 마이그레이션해주세요: "></textarea></label>
+      <label><span data-i18n="rfAgent">전문가</span>
+        <select id="rfAgent">
+          <option value="">(자동)</option>
+          <option value="implementer">implementer</option>
+          <option value="debugger">debugger</option>
+          <option value="librarian">librarian</option>
+          <option value="oracle">oracle</option>
+          <option value="code-reviewer">code-reviewer</option>
+          <option value="security">security</option>
+          <option value="plan">plan</option>
+        </select>
+      </label>
+      <label><span data-i18n="rfSpeed">꼼꼼함</span>
+        <select id="rfSpeed"><option value="haiku">haiku</option><option value="sonnet" selected>sonnet</option><option value="opus">opus</option></select>
+      </label>
+      <label><span data-i18n="rfPerm">안전</span>
+        <select id="rfPerm"><option value="acceptEdits" selected data-i18n="safeFolder">이 폴더만</option><option value="plan" data-i18n="safeRead">읽기만</option></select>
+      </label>
+      <div class="form-acts">
+        <button class="btn go" id="rfSave" data-i18n="rfSave">저장</button>
+        <button class="btn" id="rfDelete" data-i18n="rfDelete">이 레시피 삭제</button>
+      </div>
+    </div>
   </div>
 </div>
 

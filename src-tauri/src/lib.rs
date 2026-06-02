@@ -191,7 +191,7 @@ fn setup_environment() -> Result<String, String> {
 
     // 스킬 설치 (~/.claude/skills/<name>/SKILL.md)
     let skills_dir = claude_dir.join("skills");
-    let skills: [(&str, &str); 12] = [
+    let skills: [(&str, &str); 13] = [
         ("git-master", include_str!("../skills/git-master/SKILL.md")),
         ("test-writer", include_str!("../skills/test-writer/SKILL.md")),
         ("frontend-ui", include_str!("../skills/frontend-ui/SKILL.md")),
@@ -204,6 +204,7 @@ fn setup_environment() -> Result<String, String> {
         ("pre-publish-review", include_str!("../skills/pre-publish-review/SKILL.md")),
         ("github-triage", include_str!("../skills/github-triage/SKILL.md")),
         ("work-with-pr", include_str!("../skills/work-with-pr/SKILL.md")),
+        ("precise-edit", include_str!("../skills/precise-edit/SKILL.md")),
     ];
     for (name, body) in skills {
         let dir = skills_dir.join(name);
@@ -254,7 +255,7 @@ fn setup_environment() -> Result<String, String> {
         std::fs::write(commands_dir.join(name), body).map_err(|e| e.to_string())?;
     }
 
-    Ok("준비 완료: 전문가 7종 + 스킬 12종 + 커맨드 4종 설치 + 팀 기능 + 안전/품질 훅".into())
+    Ok("준비 완료: 전문가 7종 + 스킬 13종 + 커맨드 4종 설치 + 팀 기능 + 안전/품질 훅".into())
 }
 
 // ~/.claude/claudecrew-hooks 에 OS별 훅 스크립트(두 벌)를 기록하고,
@@ -668,6 +669,16 @@ fn note_port(app: &AppHandle, id: &str, line: &str) {
     }
 }
 
+// ---------------- 커맨드: API 모드 감지 (안전: 키를 저장/취급하지 않음) ----------------
+// 환경에 ANTHROPIC_API_KEY 가 이미 있으면 Claude Code가 API 경로로 인증한다.
+// 우리는 그 사실만 읽어 UI에 표시할 뿐, 키를 만들거나 저장하지 않는다(안전 원칙 1장).
+#[tauri::command]
+fn check_api_mode() -> bool {
+    std::env::var("ANTHROPIC_API_KEY")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+}
+
 // ---------------- 커맨드: 미리보기(브라우저로 열기) ----------------
 #[tauri::command]
 fn open_url(app: AppHandle, url: String) -> Result<(), String> {
@@ -878,6 +889,43 @@ fn enable_search(repo: String) -> Result<String, String> {
     Ok("검색 켜짐: 공식 문서 검색(context7)을 연결했어요.".into())
 }
 
+// 정밀 편집(LSP/시맨틱 MCP): serena(심볼/참조 도구)를 .mcp.json 에 연결/해제.
+// serena는 uv(uvx)로 구동되는 오픈소스 도구. 설치/실행은 사용자 환경에 의존.
+#[tauri::command]
+fn enable_lsp(repo: String) -> Result<String, String> {
+    if !PathBuf::from(&repo).exists() {
+        return Err(format!("폴더가 없습니다: {repo}"));
+    }
+    let (path, mut root) = load_mcp(&repo);
+    root["mcpServers"]["serena"] = serde_json::json!({
+        "command": "uvx",
+        "args": [
+            "--from", "git+https://github.com/oraios/serena",
+            "serena", "start-mcp-server",
+            "--context", "ide-assistant",
+            "--project", repo
+        ]
+    });
+    std::fs::write(&path, serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    Ok("정밀 편집 켜짐: 심볼/참조 도구(serena)를 연결했어요. (uv 필요)".into())
+}
+
+#[tauri::command]
+fn disable_lsp(repo: String) -> Result<String, String> {
+    let path = PathBuf::from(&repo).join(".mcp.json");
+    if !path.exists() {
+        return Ok("정밀 편집은 이미 꺼져 있어요.".into());
+    }
+    let (_p, mut root) = load_mcp(&repo);
+    if let Some(servers) = root.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
+        servers.remove("serena");
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    Ok("정밀 편집 끔.".into())
+}
+
 // Exa 웹검색: 사용자 본인 키를 .mcp.json 에 등록(키가 비면 제거). 키는 사용자 소유물이다.
 #[tauri::command]
 fn set_exa_key(repo: String, key: String) -> Result<String, String> {
@@ -985,8 +1033,11 @@ pub fn run() {
             enable_search,
             disable_search,
             set_exa_key,
+            enable_lsp,
+            disable_lsp,
             open_url,
-            restore_agents
+            restore_agents,
+            check_api_mode
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

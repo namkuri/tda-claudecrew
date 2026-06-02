@@ -42,6 +42,8 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
 - `docs/SETUP-GUIDE.md` — **사용자가 직접 할 일**(git init·push, Pages/Actions 켜기, 설치파일 내려받기)
 - `docs/RUN-AND-TEST.md` — **데스크톱 앱 실행·기능별 테스트 시나리오**(온보딩~미리보기·팀·검색·복원까지)
 - `claudecrew-plugin/` — 전문가·스킬·훅·MCP를 한 덩어리로 묶은 배포용 플러그인(부록A 8)
+- `scripts/build-plugin.mjs` — `claudecrew-plugin/`을 src-tauri 원본으로 채우는 빌드 스크립트
+- `src-tauri/AGENTS.md` — 전문가/스킬/훅 거버넌스(추가 규칙·구성요소 표)
 - `src-tauri/tauri.conf.json` — 창/번들/아이콘/`frontendDist: ../ui`
 - `src-tauri/capabilities/default.json` — dialog/opener 권한
 - `docs/ROADMAP.md` — **다음 단계 작업 백로그(우선순위·완료기준 포함)**
@@ -72,6 +74,13 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - 스킬 **12종**: +github-triage(+scripts/gh-list), +work-with-pr.
   - **레시피 마켓/공유(V2.1)**: 커스텀 레시피 localStorage + 내보내기/가져오기(JSON 묶음). 가져온 레시피는 점선 버튼으로 렌더.
   - **API 전환 힌트(V2.3)**: 동시 실행 3개 이상이면 "API 권장" 배지.
+- **고도화(v0.6 — 대>중>소)**:
+  - **다국어(V2.4)**: KO/EN i18n(`data-i18n` 속성 + `t()`/`applyI18n` + 헤더 언어 토글). 레시피 프롬프트 텍스트도 언어별.
+  - **정밀 편집(V2.2)**: precise-edit 스킬 + `enable_lsp`/`disable_lsp`(serena 시맨틱 MCP를 `.mcp.json`에) + UI "정밀 편집" 토글. → 스킬 **13종**.
+  - **API 모드 감지(V2.3, 안전)**: `check_api_mode`가 환경의 `ANTHROPIC_API_KEY` 존재만 읽어 "✓ API 모드" 표시. **키를 저장/취급하지 않음**(안전 원칙).
+  - **레시피 인앱 편집기**: ＋레시피 만들기 모달(이름/이모지/문구/전문가/속도/안전), 커스텀 레시피 우클릭 편집·삭제.
+  - **배포 전 검토 게이트**: 🚦 레시피 → pre-publish-review 스킬(다중 관점 병렬).
+  - **플러그인 빌드**: `node scripts/build-plugin.mjs`가 `claudecrew-plugin/`을 원본으로 채우고 버전 동기화. `src-tauri/AGENTS.md` 거버넌스.
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.
