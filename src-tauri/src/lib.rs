@@ -29,6 +29,7 @@ struct AgentInfo {
     tokens_in: Option<u64>,  // 누적 입력 토큰
     tokens_out: Option<u64>, // 누적 출력 토큰
     ctx: Option<u64>,        // 마지막 턴의 컨텍스트 크기(입력+캐시읽기)
+    session_id: Option<String>, // Claude Code 세션 ID (후속 대화에 사용)
 }
 
 struct AppState {
@@ -412,6 +413,7 @@ fn create_agent(
         tokens_in: None,
         tokens_out: None,
         ctx: None,
+        session_id: None,
     };
     state.agents.lock().unwrap().insert(id.clone(), info.clone());
     let _ = app.emit("agent_update", info);
@@ -433,12 +435,13 @@ implementer 구현, debugger 디버깅, code-reviewer 검토, plan 계획, secur
             Some(name) if !name.is_empty() => format!(
                 "{prompt}\n\n— 위 요청을 `{name}` 전문가(서브에이전트)에게 위임해 끝까지 처리하고, 끝나면 무엇을 했는지 한국어로 요약하세요."
             ),
-            // 기본: 오케스트레이터가 전문가·스킬을 스스로 고른다 (안내는 짧게)
+            // 기본: 오케스트레이터가 전문가·스킬을 스스로 고른다 (병렬 위임 강조)
             _ => format!(
                 "{prompt}\n\n\
-— 위 요청을 끝까지 처리하세요. 필요하면 적합한 전문가(서브에이전트: oracle/librarian/implementer/debugger/code-reviewer/plan/security)와 \
-스킬을 스스로 골라 쓰고, 마땅한 스킬이 없는데 재사용할 가치가 있으면 새 스킬을 만들어도 됩니다. \
-모호하면 합리적으로 가정해 진행하고, 끝나면 무엇을 했는지 한국어로 요약하세요."
+— 위 요청을 끝까지 처리하세요. 당신은 오케스트레이터로서, 일을 작은 조각으로 나눈 뒤 적합한 전문가(서브에이전트: oracle/librarian/implementer/debugger/code-reviewer/plan/security)에게 \
+**Task 도구로 위임**하세요. 서로 독립적인 조각은 **한 어시스턴트 턴에 Task들을 모아 동시에 호출**해 병렬로 진행하세요. \
+스킬은 자유롭게 쓰고, 마땅한 게 없는데 재사용할 가치가 있으면 새 스킬을 만들어도 됩니다. 모호한 점은 합리적으로 가정해 진행하고, \
+끝나면 누가/무엇을 했고 결과가 무엇인지 한국어로 짧게 요약하세요."
             ),
         }
     };
@@ -447,7 +450,7 @@ implementer 구현, debugger 디버깅, code-reviewer 검토, plan 계획, secur
     let app2 = app.clone();
     let id_for_thread = id.clone();
     std::thread::spawn(move || {
-        run_agent(app2, id_for_thread, repo, effective_prompt, model, permission, branch, worktree, keepgoing, use_subscription);
+        run_agent(app2, id_for_thread, repo, effective_prompt, model, permission, branch, worktree, keepgoing, use_subscription, None);
     });
 
     Ok(id)
@@ -463,6 +466,7 @@ fn set_status(app: &AppHandle, id: &str, status: &str) {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn run_agent(
     app: AppHandle,
     id: String,
@@ -474,21 +478,24 @@ fn run_agent(
     worktree: String,
     keepgoing: bool,
     use_subscription: bool,
+    resume_sid: Option<String>, // Some이면 후속 메시지(같은 worktree, --resume 사용)
 ) {
-    // 1) worktree 생성
-    std::fs::create_dir_all(PathBuf::from(&repo).join(".agentboard")).ok();
-    let created = git(&repo, &["worktree", "add", "-b", &format!("ab/{branch}"), &worktree, "HEAD"])
-        .or_else(|_| git(&repo, &["worktree", "add", &worktree, "HEAD"]));
-    if let Err(e) = created {
-        emit_output(&app, &id, &format!("[작업 공간 생성 실패] {e}"));
-        set_status(&app, &id, "error");
-        return;
+    // 1) worktree 준비 (후속 메시지면 이미 있으니 생성 생략)
+    if resume_sid.is_none() {
+        std::fs::create_dir_all(PathBuf::from(&repo).join(".agentboard")).ok();
+        let created = git(&repo, &["worktree", "add", "-b", &format!("ab/{branch}"), &worktree, "HEAD"])
+            .or_else(|_| git(&repo, &["worktree", "add", &worktree, "HEAD"]));
+        if let Err(e) = created {
+            emit_output(&app, &id, &format!("[작업 공간 생성 실패] {e}"));
+            set_status(&app, &id, "error");
+            return;
+        }
     }
 
     set_status(&app, &id, "running");
 
-    // 2) claude -p 헤드리스 실행
-    let args: Vec<String> = vec![
+    // 2) claude -p 헤드리스 실행 (후속 메시지면 --resume <session_id> 추가)
+    let mut args: Vec<String> = vec![
         "-p".into(),
         prompt,
         "--output-format".into(),
@@ -499,6 +506,9 @@ fn run_agent(
         "--permission-mode".into(),
         permission,
     ];
+    if let Some(sid) = resume_sid.as_deref() {
+        if !sid.is_empty() { args.push("--resume".into()); args.push(sid.into()); }
+    }
     let mut cmd = claude_command(&args);
     cmd.current_dir(&worktree)
         .stdout(Stdio::piped())
@@ -557,6 +567,17 @@ fn run_agent(
             }
             match serde_json::from_str::<Value>(line) {
                 Ok(evt) => {
+                    // session_id 캐치: 첫 system init 이벤트(또는 result)에 들어 있다
+                    if let Some(sid) = evt.get("session_id").and_then(|v| v.as_str()) {
+                        let state = app.state::<AppState>();
+                        let mut agents = state.agents.lock().unwrap();
+                        if let Some(a) = agents.get_mut(&id) {
+                            if a.session_id.as_deref() != Some(sid) {
+                                a.session_id = Some(sid.to_string());
+                                let _ = app.emit("agent_update", a.clone());
+                            }
+                        }
+                    }
                     process_teammates(&app, &id, &evt, &mut teammates);
                     // 토큰/컨텍스트 사용량 추적
                     if let Some((tin, tout, ctx)) = usage_of(&evt) {
@@ -739,6 +760,36 @@ fn note_port(app: &AppHandle, id: &str, line: &str) {
             }
         }
     }
+}
+
+// ---------------- 커맨드: 후속 메시지 보내기(세션 재개) ----------------
+// 기존 작업 탭에서 같은 worktree·같은 Claude Code 세션으로 추가 지시를 보낸다(`--resume`).
+// 사용자가 단발성이 아니라 진짜 대화로 쓸 수 있게 함.
+#[tauri::command]
+fn send_message(app: AppHandle, id: String, prompt: String) -> Result<(), String> {
+    if prompt.trim().is_empty() { return Err("메시지가 비어 있습니다.".into()); }
+    let state = app.state::<AppState>();
+    let (repo, branch, worktree, model, permission, sid) = {
+        let agents = state.agents.lock().unwrap();
+        let a = agents.get(&id).ok_or("없는 작업")?;
+        if a.status == "running" || a.status == "creating" {
+            return Err("작업이 아직 진행 중입니다. 끝난 뒤 보내주세요.".into());
+        }
+        (a.repo.clone(), a.branch.clone(), a.worktree.clone(),
+         if a.model.is_empty() { "sonnet".into() } else { a.model.clone() },
+         if a.permission.is_empty() { "acceptEdits".into() } else { a.permission.clone() },
+         a.session_id.clone())
+    };
+    let Some(session_id) = sid else { return Err("세션 ID가 없어요(이 작업은 아직 한 번도 응답을 받지 못했어요).".into()); };
+    // 새 사용자 메시지가 시작됨을 표시하기 위해 상태/로그에 구분선
+    emit_output(&app, &id, &format!("\n💬 사용자: {}", prompt));
+    set_status(&app, &id, "running");
+    let app2 = app.clone();
+    let id2 = id.clone();
+    std::thread::spawn(move || {
+        run_agent(app2, id2, repo, prompt, model, permission, branch, worktree, false, true, Some(session_id));
+    });
+    Ok(())
 }
 
 // ---------------- 커맨드: Claude Code 사용량 통계 ----------------
@@ -926,6 +977,7 @@ fn restore_agents(app: AppHandle, repo: String) -> Vec<AgentInfo> {
                     tokens_in: None,
                     tokens_out: None,
                     ctx: None,
+                    session_id: None,
                 };
                 state.agents.lock().unwrap().insert(id, info);
             }
@@ -1227,7 +1279,8 @@ pub fn run() {
             open_url,
             restore_agents,
             check_api_mode,
-            read_usage
+            read_usage,
+            send_message
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

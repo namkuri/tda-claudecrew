@@ -273,6 +273,13 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .console.sub.working{border-color:var(--run)}
 .console.sub.done{border-color:var(--accent-d)}
 
+/* 후속 메시지 입력창 */
+.follow-up{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--line);background:var(--panel)}
+.follow-up textarea{flex:1;background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-family:var(--font);font-size:13px;resize:none;outline:none;line-height:1.45}
+.follow-up textarea:focus{border-color:var(--accent-d)}
+.follow-up textarea:disabled{opacity:.45;cursor:not-allowed}
+.follow-up .btn.go{padding:9px 18px;font-size:13px;flex:none;align-self:stretch}
+
 /* 최하단 상태바 */
 .statusbar{display:flex;align-items:center;gap:14px;padding:7px 16px;border-top:1px solid var(--line);background:var(--panel);font-family:var(--mono);font-size:11.5px;color:var(--dim);white-space:nowrap;overflow-x:auto}
 .statusbar .sb-seg{display:inline-flex;align-items:center;gap:6px}

@@ -96,6 +96,10 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **오케스트레이션 프롬프트 버그 수정**: 지시문이 앞에 길게 깔려 요청이 묻혀 모델이 "요청이 비었다"며 되묻던 문제 → **사용자 요청을 맨 앞에 두고 안내는 짧게 뒤로**. (team/agent/auto 세 분기 모두)
   - **토큰/컨텍스트 상태바(최하단)**: `usage_of`로 stream-json의 `usage`(input/output/cache) 추출 → AgentInfo.tokens_in/out/ctx. 상태바에 **세션 ↑/↓ 합계 · 오늘/최근7일(Claude Code stats-cache) · 현재 작업 컨텍스트(토큰/200k % + 막대)**. 구독 잔여 한도는 Claude Code가 비공개라 '사용량'으로 표기(ⓘ 안내).
   - **read_usage 커맨드(v0.8.2)**: `~/.claude/stats-cache.json`(Claude Code `/usage` 화면의 원본)을 읽어 `UsageStats`(모델별 합계 · 오늘/주간 토큰·메시지·세션 수)로 반환. 15초 주기 갱신. 상태바에 "Claude Code" 출처 배지.
+- **대화 가능한 작업 + 진짜 병렬 오케스트레이션(v0.8.3)**:
+  - **세션 재개**: stream-json system 이벤트의 `session_id`를 `AgentInfo`에 저장. `send_message(id, prompt)` 커맨드가 같은 worktree에서 `claude -p -r <session_id>`로 후속 메시지 실행 → 한 작업 탭에서 **대화로 이어 말할 수 있음**.
+  - UI: 에이전트 뷰 하단에 후속 입력창(Enter 보내기, Shift+Enter 줄바꿈). 사용자 메시지는 메인 콘솔에 `💬 사용자: …`로 기록.
+  - **자동 오케스트레이션 강화**: 프롬프트에 "독립적인 조각은 한 어시스턴트 턴에 Task들을 묶어 동시에 호출해 병렬 진행"을 명시.
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.

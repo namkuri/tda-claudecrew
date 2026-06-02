@@ -63,6 +63,8 @@ const I18N = {
     avApply: "적용", avStop: "멈추기", avRevert: "되돌리기", avDiff: "전체 diff", termWaiting: "에이전트를 기다리는 중…",
     sb_creating: "저 준비하고 있어요…", sb_running: "저 지금 작업하는 중이에요!", sb_done: "저 작업 끝냈어요! ✅", sb_committed: "저장까지 마쳤어요! 💾", sb_error: "앗, 문제가 생겼어요 😵", sb_stopped: "잠깐 멈췄어요 ⏸",
     orchestrator: "오케스트레이터", agentConsole: "에이전트 콘솔", sub_working: "작업 받는 중…", sub_done: "완료",
+    followPh: "추가로 부탁하거나 물어볼 내용… (Enter 보내기 · Shift+Enter 줄바꿈)", followSend: "보내기 ↵",
+    noSession: "이 작업은 아직 세션이 시작되지 않아 후속 대화를 보낼 수 없어요.",
     tokenSrc: "토큰", tokenSub: "구독 플랜", tokenApi: "API 키", tokenTitle: "어떤 토큰으로 청구할지 — 구독(앱 플랜) 또는 API 키",
     composerHint: "무엇을 원하는지 적기만 하면, 알아서 전문가와 스킬을 골라 처리해요. (아래 템플릿은 선택)",
     quickTpl: "빠른 템플릿 (선택)",
@@ -125,6 +127,8 @@ const I18N = {
     avApply: "Apply", avStop: "Stop", avRevert: "Revert", avDiff: "Full diff", termWaiting: "Waiting for the agent…",
     sb_creating: "Getting ready…", sb_running: "I'm working on it!", sb_done: "All done! ✅", sb_committed: "Saved it! 💾", sb_error: "Oops, something went wrong 😵", sb_stopped: "Paused for now ⏸",
     orchestrator: "Orchestrator", agentConsole: "Agent console", sub_working: "Receiving task…", sub_done: "done",
+    followPh: "Ask a follow-up or give the next step… (Enter to send · Shift+Enter for newline)", followSend: "Send ↵",
+    noSession: "No session yet — this task hasn't produced its first response, so follow-up isn't possible.",
     tokenSrc: "Tokens", tokenSub: "Subscription", tokenApi: "API key", tokenTitle: "Which tokens to bill — your subscription (app plan) or an API key",
     composerHint: "Just write what you want — it picks the right experts and skills for you. (Templates below are optional.)",
     quickTpl: "Quick templates (optional)",
@@ -183,12 +187,21 @@ function makeDemoApi(){
       setTimeout(() => emit("teammate_update", { agentId: id, name: nm, result, status: "done" }), 2600 + i * 600);
     });
     setTimeout(() => { a.port = 5173; a.ctx = 18500; a.tokens_in = 18500; a.tokens_out = 2400; emit("agent_update", { ...a }); }, 2200);
-    setTimeout(() => { a.status = "done"; a.cost = 0.0123; a.ctx = 42800; a.tokens_in = 42800; a.tokens_out = 9100; emit("agent_done", { ...a }); }, 800 + sample.length * 600 + 400);
+    setTimeout(() => { a.status = "done"; a.cost = 0.0123; a.ctx = 42800; a.tokens_in = 42800; a.tokens_out = 9100; a.session_id = "demo-sess-"+n; emit("agent_done", { ...a }); }, 800 + sample.length * 600 + 400);
     return Promise.resolve(id);
   }
   const invoke = (cmd, args = {}) => {
     switch (cmd){
       case "read_usage":        return Promise.resolve({ available:true, today_tokens:185000, week_tokens:1240000, today_messages:42, week_messages:286, total_messages:1320, total_sessions:18, models:["claude-sonnet-4-6","claude-opus-4-7"] });
+      case "send_message": {
+        const cur = agents[args.id]; if (!cur) return Promise.resolve();
+        emit("agent_output", { id: args.id, text: "\n💬 사용자: " + args.prompt });
+        cur.status = "running"; emit("agent_update", { ...cur });
+        setTimeout(() => emit("agent_output", { id: args.id, text: "🔧 후속 분석 중…" }), 600);
+        setTimeout(() => emit("agent_output", { id: args.id, text: lang === "ko" ? "후속 처리 완료." : "Follow-up done." }), 1500);
+        setTimeout(() => { cur.status = "done"; cur.tokens_in = (cur.tokens_in||0) + 8200; cur.tokens_out = (cur.tokens_out||0) + 1500; cur.ctx = 51000; emit("agent_done", { ...cur }); }, 1800);
+        return Promise.resolve();
+      }
       case "check_claude":      return Promise.resolve(t("demoCheck"));
       case "setup_environment": return Promise.resolve(t("demoSetup"));
       case "get_cost_cap":      return Promise.resolve(5);
@@ -730,6 +743,10 @@ function renderAgentView(a){
        </div>
        ${renderSubConsoles(a)}
      </div>
+     <div class="follow-up">
+       <textarea id="followUp-${a.id}" rows="2" placeholder="${esc(t("followPh"))}" ${a.status === "running" || a.status === "creating" ? "disabled" : ""}></textarea>
+       <button class="btn go" data-act="send" ${a.status === "running" || a.status === "creating" || !a.session_id ? "disabled" : ""} title="${a.session_id ? "" : esc(t("noSession"))}">${t("followSend")}</button>
+     </div>
      <div class="av-acts">
        ${a.port ? `<button data-act="preview" class="primary">${t("preview", a.port)}</button>` : ""}
        <button data-act="apply" class="primary">${t("avApply")}</button>
@@ -743,6 +760,19 @@ function renderAgentView(a){
   av.querySelector('[data-act="stop"]').onclick = () => invoke("stop_agent", { id: a.id });
   av.querySelector('[data-act="cleanup"]').onclick = () => { if (confirm(t("cleanupConfirm"))) invoke("cleanup_agent", { id: a.id }); };
   const pv = av.querySelector('[data-act="preview"]'); if (pv) pv.onclick = () => invoke("open_url", { url: "http://localhost:" + a.port });
+  // 후속 메시지 보내기 — Enter(Shift+Enter는 줄바꿈), 또는 버튼
+  const ta = av.querySelector("#followUp-" + a.id);
+  const sendBtn = av.querySelector('[data-act="send"]');
+  const send = async () => {
+    const msg = (ta.value || "").trim(); if (!msg) return;
+    sendBtn.disabled = true; ta.disabled = true;
+    try { await invoke("send_message", { id: a.id, prompt: msg }); ta.value = ""; }
+    catch (e) { alert(t("opFail") + e); sendBtn.disabled = false; ta.disabled = false; }
+  };
+  if (sendBtn) sendBtn.onclick = send;
+  if (ta) ta.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  });
 }
 
 function renderGit(){
