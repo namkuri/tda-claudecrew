@@ -66,7 +66,8 @@ const I18N = {
     newTask: "＋ 새 작업", newTabLabel: "＋ 새 작업", connected: "연결됨", disconnected: "연결 안 됨", demoConn: "데모 모드",
     gpEmpty: "작업을 선택하면 변경/커밋 상태가 여기에 보여요.", gpBase: "기준", gpAgainst: "기준 브랜치 대비 변경", gpCommitPh: "저장(커밋) 메시지…", gpCommit: "커밋", gpNoChange: "바뀐 점이 없어요.",
     avApply: "적용", avStop: "멈추기", avRevert: "되돌리기", avDiff: "전체 diff", termWaiting: "에이전트를 기다리는 중…",
-    sb_creating: "저 준비하고 있어요…", sb_running: "저 지금 작업하는 중이에요!", sb_done: "저 작업 끝냈어요! ✅", sb_committed: "저장까지 마쳤어요! 💾", sb_error: "앗, 문제가 생겼어요 😵", sb_stopped: "잠깐 멈췄어요 ⏸",
+    sb_creating: "저 준비하고 있어요…", sb_warming: "📚 프로젝트 학습 중…", sb_running: "저 지금 작업하는 중이에요!", sb_done: "저 작업 끝냈어요! ✅", sb_committed: "저장까지 마쳤어요! 💾", sb_error: "앗, 문제가 생겼어요 😵", sb_stopped: "잠깐 멈췄어요 ⏸",
+    status_warming: "학습 중",
     orchestrator: "오케스트레이터", agentConsole: "에이전트 콘솔", sub_working: "작업 받는 중…", sub_done: "완료",
     followPh: "추가로 부탁하거나 물어볼 내용… (Enter 보내기 · Shift+Enter 줄바꿈)", followSend: "보내기 ↵",
     noSession: "이 작업은 아직 세션이 시작되지 않아 후속 대화를 보낼 수 없어요.",
@@ -137,7 +138,8 @@ const I18N = {
     newTask: "＋ New task", newTabLabel: "＋ New task", connected: "Connected", disconnected: "Not connected", demoConn: "Demo mode",
     gpEmpty: "Select a task to see its changes and commit status here.", gpBase: "Base", gpAgainst: "Changes vs base", gpCommitPh: "Commit message…", gpCommit: "Commit", gpNoChange: "No changes.",
     avApply: "Apply", avStop: "Stop", avRevert: "Revert", avDiff: "Full diff", termWaiting: "Waiting for the agent…",
-    sb_creating: "Getting ready…", sb_running: "I'm working on it!", sb_done: "All done! ✅", sb_committed: "Saved it! 💾", sb_error: "Oops, something went wrong 😵", sb_stopped: "Paused for now ⏸",
+    sb_creating: "Getting ready…", sb_warming: "📚 Learning the project…", sb_running: "I'm working on it!", sb_done: "All done! ✅", sb_committed: "Saved it! 💾", sb_error: "Oops, something went wrong 😵", sb_stopped: "Paused for now ⏸",
+    status_warming: "Warming",
     orchestrator: "Orchestrator", agentConsole: "Agent console", sub_working: "Receiving task…", sub_done: "done",
     followPh: "Ask a follow-up or give the next step… (Enter to send · Shift+Enter for newline)", followSend: "Send ↵",
     noSession: "No session yet — this task hasn't produced its first response, so follow-up isn't possible.",
@@ -193,8 +195,12 @@ function makeDemoApi(){
                 role, status: "creating", cost: null, output: [] };
     agents[id] = a;
     emit("agent_update", { ...a });
-    setTimeout(() => { a.status = "running"; emit("agent_update", { ...a }); }, 400);
-    sample.forEach((line, i) => setTimeout(() => emit("agent_output", { id, text: line }), 800 + i * 600));
+    // 데모도 웜업 → running 흐름을 보여줌
+    setTimeout(() => { a.status = "warming"; emit("agent_update", { ...a }); }, 300);
+    setTimeout(() => emit("agent_output", { id, text: "📚 학습 claude -p <ctx> --output-format stream-json … (인자 480자)" }), 500);
+    setTimeout(() => emit("agent_output", { id, text: "📚 학습 완료: OK, 컨텍스트 학습 완료" }), 1200);
+    setTimeout(() => { a.status = "running"; emit("agent_update", { ...a }); }, 1400);
+    sample.forEach((line, i) => setTimeout(() => emit("agent_output", { id, text: line }), 1700 + i * 600));
     // 오케스트레이터가 전문가들을 호출(Task)하는 모습 — 멀티 콘솔 시뮬
     const crew = ko
       ? [["debugger","원인 분석: 이벤트 핸들러 누락 추적","onLogin에서 click 리스너 미등록 확인"],
@@ -204,11 +210,11 @@ function makeDemoApi(){
          ["implementer","Implement fix: bind + enable","added btn.addEventListener('click', submit)"],
          ["code-reviewer","Review change: regressions/style","Looks good — recommend applying"]];
     crew.forEach(([nm, desc, result], i) => {
-      setTimeout(() => emit("teammate_update", { agentId: id, name: nm, desc, status: "working" }), 900 + i * 600);
-      setTimeout(() => emit("teammate_update", { agentId: id, name: nm, result, status: "done" }), 2600 + i * 600);
+      setTimeout(() => emit("teammate_update", { agentId: id, name: nm, desc, status: "working" }), 1800 + i * 600);
+      setTimeout(() => emit("teammate_update", { agentId: id, name: nm, result, status: "done" }), 3500 + i * 600);
     });
-    setTimeout(() => { a.port = 5173; a.ctx = 18500; a.tokens_in = 18500; a.tokens_out = 2400; emit("agent_update", { ...a }); }, 2200);
-    setTimeout(() => { a.status = "done"; a.cost = 0.0123; a.ctx = 42800; a.tokens_in = 42800; a.tokens_out = 9100; a.session_id = "demo-sess-"+n; emit("agent_done", { ...a }); }, 800 + sample.length * 600 + 400);
+    setTimeout(() => { a.port = 5173; a.ctx = 18500; a.tokens_in = 18500; a.tokens_out = 2400; emit("agent_update", { ...a }); }, 3100);
+    setTimeout(() => { a.status = "done"; a.cost = 0.0123; a.ctx = 42800; a.tokens_in = 42800; a.tokens_out = 9100; a.session_id = "demo-sess-"+n; emit("agent_done", { ...a }); }, 1700 + sample.length * 600 + 400);
     return Promise.resolve(id);
   }
   const invoke = (cmd, args = {}) => {

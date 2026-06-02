@@ -582,109 +582,78 @@ fn save_agent_state(a: &AgentInfo) {
     }
 }
 
+// 한 번의 `claude -p` 호출(스폰 → stream-json 파싱 → 종료 대기)을 끝까지 수행한다.
+// quiet=true 면 사용자 콘솔에 결과 텍스트를 안 누적한다(웜업 단계용 — 토큰/세션ID는 추적).
+// 반환: (성공 여부, exit code) — 호출자가 다음 단계(예: 메인 메시지 실행)를 결정한다.
 #[allow(clippy::too_many_arguments)]
-fn run_agent(
-    app: AppHandle,
-    id: String,
-    repo: String,
-    prompt: String,
-    model: String,
-    permission: String,
-    branch: String,
-    worktree: String,
+fn spawn_claude_once(
+    app: &AppHandle,
+    id: &str,
+    repo: &str,
+    worktree: &str,
+    prompt: &str,
+    model: &str,
+    permission: &str,
     keepgoing: bool,
     use_subscription: bool,
-    resume_sid: Option<String>, // Some이면 후속 메시지(같은 worktree, --resume 사용)
-) {
-    // 1) worktree 준비 (후속 메시지면 이미 있으니 생성 생략)
-    if resume_sid.is_none() {
-        std::fs::create_dir_all(PathBuf::from(&repo).join(".agentboard")).ok();
-        let created = git(&repo, &["worktree", "add", "-b", &format!("ab/{branch}"), &worktree, "HEAD"])
-            .or_else(|_| git(&repo, &["worktree", "add", &worktree, "HEAD"]));
-        if let Err(e) = created {
-            emit_output(&app, &id, &format!("[작업 공간 생성 실패] {e}"));
-            set_status(&app, &id, "error");
-            return;
-        }
-    }
-
-    set_status(&app, &id, "running");
-
-    // 2) claude -p 헤드리스 실행 (후속 메시지면 --resume <session_id> 추가)
+    resume_sid: Option<&str>,
+    quiet: bool,
+) -> (bool, Option<i32>) {
+    let _ = repo; // 현재 인자 직접 사용 안 함(향후 확장용)
+    // 인자 구성
     let mut args: Vec<String> = vec![
         "-p".into(),
-        prompt,
+        prompt.to_string(),
         "--output-format".into(),
         "stream-json".into(),
         "--verbose".into(),
         "--model".into(),
-        model,
+        model.to_string(),
         "--permission-mode".into(),
-        permission,
+        permission.to_string(),
     ];
-    if let Some(sid) = resume_sid.as_deref() {
+    if let Some(sid) = resume_sid {
         if !sid.is_empty() { args.push("--resume".into()); args.push(sid.into()); }
-    } else {
-        // 첫 호출에만 프로젝트 컨텍스트(CLAUDE.md/AGENTS.md/README)를 시스템 프롬프트로 주입.
-        // ⚠ 큰 텍스트를 --append-system-prompt 인자로 직접 주면 Windows cmd /C 의 8191자 명령행
-        // 한도에 걸려 claude 가 즉시 종료된다. 파일로 전달(--append-system-prompt-file)해서 회피.
-        if let Some(ctx) = build_context_prompt(&repo) {
-            let ctx_path = PathBuf::from(&worktree).join(".cc-system-prompt.md");
-            if let Err(e) = std::fs::write(&ctx_path, &ctx) {
-                emit_output(&app, &id, &format!("[알림] 시스템 프롬프트 파일 쓰기 실패: {e} (컨텍스트 주입 건너뜀)"));
-            } else {
-                args.push("--append-system-prompt-file".into());
-                args.push(ctx_path.to_string_lossy().to_string());
-            }
-        }
     }
+
     let mut cmd = claude_command(&args);
-    cmd.current_dir(&worktree)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    // "끝까지 모드"가 켜지면 Stop/TeammateIdle 훅이 작동하도록 환경변수 전달
-    if keepgoing {
-        cmd.env("CLAUDECREW_KEEPGOING", "1");
-    }
-    // 토큰 소스: 구독(앱 플랜) 선택 시 API 키 환경변수를 자식에서 제거 →
-    // Claude Code가 로그인된 구독(Claude Max 등)으로 청구한다. (우리는 키를 만들지 않는다)
+    cmd.current_dir(worktree).stdout(Stdio::piped()).stderr(Stdio::piped());
+    if keepgoing { cmd.env("CLAUDECREW_KEEPGOING", "1"); }
     if use_subscription {
         cmd.env_remove("ANTHROPIC_API_KEY");
         cmd.env_remove("ANTHROPIC_AUTH_TOKEN");
     }
 
-    // 진단용: 어떤 옵션으로 호출했는지 한 줄로 남긴다(긴 인자값은 길이만 표시).
+    // 진단 로그(웜업/메인 모두) — 명령행 길이와 옵션 요약
     {
         let summary: Vec<String> = args.iter().map(|a| {
             if a.len() > 80 { format!("<{}자>", a.chars().count()) } else { a.clone() }
         }).collect();
         let total: usize = args.iter().map(|a| a.len() + 1).sum();
-        emit_output(&app, &id, &format!("$ claude {} (총 인자 {}자)", summary.join(" "), total));
+        let tag = if quiet { "📚 학습" } else { "$" };
+        emit_output(app, id, &format!("{tag} claude {} (인자 {}자)", summary.join(" "), total));
     }
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            emit_output(&app, &id, &format!("[claude 실행 실패] {e}"));
-            emit_output(&app, &id, "→ 확인: ① `claude --version` 동작 여부 ② PATH 등록 ③ Windows이면 cmd /C 래퍼가 인자 길이(8191자)를 초과하지 않는지");
-            set_status(&app, &id, "error");
-            return;
+            emit_output(app, id, &format!("[claude 실행 실패] {e}"));
+            emit_output(app, id, "→ 확인: ① `claude --version` ② PATH ③ 인자 길이");
+            return (false, None);
         }
     };
 
-    // pid 저장 (중지용)
+    // pid 저장
     {
         let state = app.state::<AppState>();
         let mut agents = state.agents.lock().unwrap();
-        if let Some(a) = agents.get_mut(&id) {
-            a.pid = Some(child.id());
-        }
+        if let Some(a) = agents.get_mut(id) { a.pid = Some(child.id()); }
     }
 
-    // stderr 드레인 스레드
+    // stderr 드레인 (사용자에게도 표시)
     if let Some(err) = child.stderr.take() {
         let app_e = app.clone();
-        let id_e = id.clone();
+        let id_e = id.to_string();
         std::thread::spawn(move || {
             let reader = BufReader::new(err);
             for line in reader.lines().map_while(Result::ok) {
@@ -695,41 +664,38 @@ fn run_agent(
         });
     }
 
-    // stdout 라인 단위 파싱 → 이벤트
-    let mut teammates: HashMap<String, String> = HashMap::new(); // tool_use_id → 전문가명
+    // stdout 파싱
+    let mut teammates: HashMap<String, String> = HashMap::new();
     if let Some(out) = child.stdout.take() {
         let reader = BufReader::new(out);
         for line in reader.lines().map_while(Result::ok) {
             let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
+            if line.is_empty() { continue; }
             match serde_json::from_str::<Value>(line) {
                 Ok(evt) => {
-                    // session_id 캐치: 첫 system init 이벤트(또는 result)에 들어 있다
+                    // session_id 캐치
                     if let Some(sid) = evt.get("session_id").and_then(|v| v.as_str()) {
                         let state = app.state::<AppState>();
                         let mut agents = state.agents.lock().unwrap();
-                        if let Some(a) = agents.get_mut(&id) {
+                        if let Some(a) = agents.get_mut(id) {
                             if a.session_id.as_deref() != Some(sid) {
                                 a.session_id = Some(sid.to_string());
                                 let _ = app.emit("agent_update", a.clone());
                             }
                         }
                     }
-                    process_teammates(&app, &id, &evt, &mut teammates);
-                    // 토큰/컨텍스트 사용량 추적
+                    if !quiet { process_teammates(app, id, &evt, &mut teammates); }
+                    // 토큰/컨텍스트
                     if let Some((tin, tout, ctx)) = usage_of(&evt) {
                         let is_result = evt.get("type").and_then(|v| v.as_str()) == Some("result");
                         let snapshot = {
                             let state = app.state::<AppState>();
                             let mut agents = state.agents.lock().unwrap();
-                            agents.get_mut(&id).map(|a| {
+                            agents.get_mut(id).map(|a| {
                                 if is_result {
-                                    a.tokens_in = Some(tin);
-                                    a.tokens_out = Some(tout);
+                                    a.tokens_in = Some(a.tokens_in.unwrap_or(0) + tin);
+                                    a.tokens_out = Some(a.tokens_out.unwrap_or(0) + tout);
                                 } else {
-                                    // 진행 중 턴: 출력은 누적 최대, 컨텍스트는 최신값
                                     a.tokens_out = Some(a.tokens_out.unwrap_or(0).max(tout));
                                 }
                                 if ctx > 0 { a.ctx = Some(ctx); }
@@ -743,13 +709,13 @@ fn run_agent(
                             {
                                 let state = app.state::<AppState>();
                                 let mut agents = state.agents.lock().unwrap();
-                                if let Some(a) = agents.get_mut(&id) {
-                                    a.cost = Some(cost);
+                                if let Some(a) = agents.get_mut(id) {
+                                    // 누적: 웜업 + 메인 비용 합산
+                                    a.cost = Some(a.cost.unwrap_or(0.0) + cost);
                                 }
                             }
-                            check_cost_cap(&app);
+                            check_cost_cap(app);
                         }
-                        // 에러 가시화: result 이벤트가 is_error 또는 subtype="error_*"면 친화 메시지로 표시
                         let is_err = evt.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false)
                             || evt.get("subtype").and_then(|v| v.as_str()).map(|s| s.starts_with("error")).unwrap_or(false);
                         if let Some(r) = evt.get("result").and_then(|v| v.as_str()) {
@@ -759,16 +725,24 @@ fn run_agent(
                                 } else if r.contains("auth") || r.contains("login") || r.contains("credential") {
                                     " (인증 필요 — Claude Code 로그인 상태 확인)"
                                 } else { "" };
-                                emit_output(&app, &id, &format!("❌ 오류: {r}{hint}"));
+                                emit_output(app, id, &format!("❌ 오류: {r}{hint}"));
+                            } else if !quiet {
+                                emit_output(app, id, r);
                             } else {
-                                emit_output(&app, &id, r);
+                                // 웜업 단계의 결과는 한 줄로만 요약 표시
+                                let short: String = r.lines().next().unwrap_or("").chars().take(120).collect();
+                                if !short.trim().is_empty() {
+                                    emit_output(app, id, &format!("📚 학습 완료: {}", short));
+                                }
                             }
                         }
-                    } else if let Some(t) = extract_text(&evt) {
-                        emit_output(&app, &id, &t);
+                    } else if !quiet {
+                        if let Some(t) = extract_text(&evt) {
+                            emit_output(app, id, &t);
+                        }
                     }
                 }
-                Err(_) => emit_output(&app, &id, line),
+                Err(_) => { if !quiet { emit_output(app, id, line); } }
             }
         }
     }
@@ -776,17 +750,84 @@ fn run_agent(
     let exit = child.wait().ok();
     let ok = exit.as_ref().map(|s| s.success()).unwrap_or(false);
     let exit_code = exit.as_ref().and_then(|s| s.code());
+    (ok, exit_code)
+}
 
-    // 진단: 실패했는데 의미 있는 출력이 거의 없으면 사용자에게 친화 메시지로 안내
+#[allow(clippy::too_many_arguments)]
+fn run_agent(
+    app: AppHandle,
+    id: String,
+    repo: String,
+    prompt: String,
+    model: String,
+    permission: String,
+    branch: String,
+    worktree: String,
+    keepgoing: bool,
+    use_subscription: bool,
+    resume_sid: Option<String>,
+) {
+    // 1) worktree 준비 (후속 메시지면 이미 있으니 생성 생략)
+    if resume_sid.is_none() {
+        std::fs::create_dir_all(PathBuf::from(&repo).join(".agentboard")).ok();
+        let created = git(&repo, &["worktree", "add", "-b", &format!("ab/{branch}"), &worktree, "HEAD"])
+            .or_else(|_| git(&repo, &["worktree", "add", &worktree, "HEAD"]));
+        if let Err(e) = created {
+            emit_output(&app, &id, &format!("[작업 공간 생성 실패] {e}"));
+            set_status(&app, &id, "error");
+            return;
+        }
+    }
+
+    // 2) 웜업 단계 — 첫 호출이고 프로젝트 컨텍스트가 있으면, 컨텍스트를 별도 메시지로 보내
+    // session_id 를 확보한 뒤 사용자 요청을 --resume 으로 보낸다.
+    // 이유: --append-system-prompt(-file) 은 인자/파일 경로가 길어지면 OS 명령행 한도에 걸리고
+    // 매 작업마다 같은 컨텍스트가 시스템 프롬프트로 다시 들어가 토큰을 낭비함.
+    // 메시지 본문으로 한 번 흘려보내면 (a) 한도 무관 (b) 세션에 자연스럽게 누적되어 후속 메시지도 컨텍스트 공유.
+    let effective_resume = if let Some(sid) = resume_sid.clone() {
+        Some(sid) // 사용자가 보낸 후속 메시지 — 웜업 안 함
+    } else if let Some(ctx) = build_context_prompt(&repo) {
+        set_status(&app, &id, "warming");
+        let warmup_prompt = format!(
+            "{ctx}\n\n\
+— 위는 이 프로젝트의 컨텍스트입니다. 다음 메시지가 실제 작업 요청이니, \
+**이번 응답에서는 코드를 수정하지 말고**, 위 컨텍스트를 숙지했음을 한 줄로만 확인해주세요.\
+한국어로 'OK, 컨텍스트 학습 완료' 정도면 충분합니다."
+        );
+        // 웜업은 항상 plan 권한(읽기만)로 — 모델이 실수로 파일 만지지 않게
+        let (ok_warm, _) = spawn_claude_once(
+            &app, &id, &repo, &worktree, &warmup_prompt, &model, "plan",
+            false /* keepgoing 끔 */, use_subscription, None, true,
+        );
+        if !ok_warm {
+            emit_output(&app, &id, "⚠ 웜업(컨텍스트 학습) 실패 — 컨텍스트 없이 본 요청을 진행합니다.");
+        }
+        // 웜업이 잡은 session_id를 가져옴
+        let state = app.state::<AppState>();
+        let agents = state.agents.lock().unwrap();
+        agents.get(&id).and_then(|a| a.session_id.clone())
+    } else {
+        None
+    };
+
+    set_status(&app, &id, "running");
+
+    // 3) 메인 — 사용자 요청
+    let (ok, exit_code) = spawn_claude_once(
+        &app, &id, &repo, &worktree, &prompt, &model, &permission,
+        keepgoing, use_subscription, effective_resume.as_deref(), false,
+    );
+
+    // 4) 종료 진단
     {
         let state = app.state::<AppState>();
         let useful_lines = state.agents.lock().unwrap().get(&id)
-            .map(|a| a.output.iter().filter(|l| !l.starts_with("$ claude ") && !l.starts_with("[알림]")).count())
+            .map(|a| a.output.iter().filter(|l| !l.starts_with("$ claude ") && !l.starts_with("📚 ") && !l.starts_with("[알림]")).count())
             .unwrap_or(0);
         if !ok && useful_lines == 0 {
             let code = exit_code.map(|c| c.to_string()).unwrap_or_else(|| "?".into());
-            emit_output(&app, &id, &format!("❌ claude 프로세스가 출력 없이 종료(exit {code})."));
-            emit_output(&app, &id, "→ 흔한 원인: (1) Windows cmd /C 명령행 한도(8191자) 초과 — CLAUDE.md/README 가 크면 발생. (2) 로그인 만료 — `claude` 한 번 직접 실행해 확인. (3) 잘못된 인자.");
+            emit_output(&app, &id, &format!("❌ claude 가 출력 없이 종료(exit {code})."));
+            emit_output(&app, &id, "→ 흔한 원인: (1) Claude Code 로그인 만료 — 터미널에서 `claude` 실행. (2) PATH에서 claude 미발견. (3) 잘못된 인자.");
         } else if !ok {
             let code = exit_code.map(|c| c.to_string()).unwrap_or_else(|| "?".into());
             emit_output(&app, &id, &format!("(claude 종료 코드: {code})"));

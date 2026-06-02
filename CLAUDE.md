@@ -119,6 +119,12 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **F4 훅 범위 분리(기본 안전)**: `setup_environment(repo, hook_scope)` — 기본 `"project"`는 훅을 **`<repo>/.claude/settings.json`** 에만 등록 → 사용자의 다른 Claude Code 세션을 안 건드림. 옵션 `"global"`(전체)·`"none"`(끄기). 기존 전역 항목은 자동 정리.
   - **F7 에러 가시성**: stream-json `result` 이벤트의 `is_error`/`subtype=error_*` 감지 → "❌ 오류: …" + 한도/인증/네트워크 힌트 자동 분기 표시.
   - **F8 Task 실패 시각화**: 서브에이전트 `tool_result.is_error` → 미니 콘솔 빨간 테두리·✗ 라벨 + 에러 메시지 표시(이전에는 무조건 ✓ done이었음 → 거짓 성공).
+- **웜업 방식 — 컨텍스트를 별도 메시지로(v0.9.2)**:
+  - `--append-system-prompt(-file)` 의존 제거. 큰 CLAUDE.md를 시스템 프롬프트로 매번 다시 보내지 않고, 첫 작업에 **별도 "학습" 메시지**(읽기 전용 plan 모드)로 한 번 흘려보내 session_id 확보 → 사용자 요청은 `--resume`으로 보냄.
+  - 장점: ① OS 명령행 한도(Windows 8191자 / 32K) **완전 무관** ② 매번 동일 컨텍스트 재전송 제거(토큰 절약) ③ 후속 메시지도 같은 세션이라 컨텍스트 공유.
+  - `spawn_claude_once` 헬퍼로 한 claude 호출(spawn → 파싱 → wait)을 추출. `quiet=true` 웜업은 결과를 짧게(`📚 학습 완료: …`) 요약.
+  - 비용/토큰은 웜업 + 메인 합산. 웜업 실패 시 메인은 컨텍스트 없이 진행.
+  - 새 상태 **`warming`**: 캐릭터 코랄 색 + 말풍선 "📚 프로젝트 학습 중…" + 사이드바·탭 점 코랄 펄스.
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.
