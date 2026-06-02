@@ -1,0 +1,102 @@
+# CLAUDE.md — ClaudeCrew 프로젝트 가이드
+
+> 이 파일은 Claude Code가 세션 시작 시 자동으로 읽습니다. 이 프로젝트를 이어서 개발할 때
+> **먼저 이 문서와 `docs/ROADMAP.md`를 읽고**, ROADMAP의 작업을 위에서부터 진행하세요.
+
+## 0. 한 줄 요약
+프로그래밍을 모르는 일반인이 **AI 전문가 팀에게 일을 맡기는** 데스크톱 앱.
+Superset의 사용성 + oh-my-opencode(omo)의 오케스트레이션을 합치되, **안전·합법**하게.
+스택: **Tauri v2 (Rust 백엔드 + 정적 HTML UI)**.
+
+## 1. 절대 지켜야 할 안전 원칙 (위반 금지)
+이 제품의 합법성은 아래 선을 지키는 데서 나온다. 어떤 작업도 이걸 넘지 않는다.
+- **공식 `claude` 바이너리만 구동**한다(헤드리스 `claude -p`). 에이전트 추론을 자체 구현하지 않는다.
+- **자격증명(OAuth 토큰/비밀번호/API 키)을 저장·전송·위조하지 않는다.** 인증은 전적으로 Claude Code가 한다.
+- **공식 클라이언트인 척 헤더를 위조하지 않는다**(과거 차단 사유).
+- 모든 작업은 **격리된 git worktree**(`<repo>/.agentboard/<branch>`)에서만 수행 → 원본 무손상·되돌리기 가능.
+- 일반인 보호를 위해 **기본 권한은 acceptEdits("이 폴더 안에서만 편집")**. 위험 작업은 차단이 기본.
+- 비용은 항상 투명하게 노출. 헤비 병렬은 구독 한도를 빠르게 소모하므로 가드 필요.
+
+## 2. 아키텍처
+```
+ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
+  └─ invoke(command) / listen(event)  ──▶  src-tauri/src/lib.rs (Rust 커맨드)
+                                              ├─ git worktree 생성/정리
+                                              ├─ claude -p --output-format stream-json 실행
+                                              └─ 진행상황을 이벤트로 emit
+공식 Claude Code(사용자 로그인) → Anthropic
+```
+- **이벤트 계약**: Rust `emit` ↔ JS `listen` 이름이 정확히 일치해야 함:
+  `agent_update`, `agent_output`(`{id,text}`), `agent_done`, `agent_removed`(`{id}`).
+- **withGlobalTauri: true** 라서 번들러 없이 `window.__TAURI__.core/.event/.dialog` 사용.
+
+## 3. 파일 지도
+- `ui/index.html` `ui/styles.css` `ui/main.js` — 온보딩 + 보드 + 레시피 + 바뀐 점(diff) UI
+- `src-tauri/src/lib.rs` — **모든 백엔드 로직**(커맨드 7종). 여기가 핵심.
+- `src-tauri/src/main.rs` — 진입점(`claudecrew_lib::run()`)
+- `src-tauri/agents/*.md` — 전문가 정의(컴파일 시 `include_str!`로 포함, `setup_environment`가 `~/.claude/agents/`에 기록)
+- `src-tauri/hooks/*.{ps1,sh}` — 안전/품질 훅 스크립트(OS 두 벌, `include_str!`로 포함, `~/.claude/claudecrew-hooks/`에 기록)
+- `src-tauri/skills/<name>/SKILL.md` — 기본 스킬(`include_str!`로 포함, `~/.claude/skills/`에 기록)
+- `.github/workflows/{build,pages}.yml` — 클라우드 빌드(제어 정책 우회) + Pages 데모 배포
+- `docs/SETUP-GUIDE.md` — **사용자가 직접 할 일**(git init·push, Pages/Actions 켜기, 설치파일 내려받기)
+- `src-tauri/tauri.conf.json` — 창/번들/아이콘/`frontendDist: ../ui`
+- `src-tauri/capabilities/default.json` — dialog/opener 권한
+- `docs/ROADMAP.md` — **다음 단계 작업 백로그(우선순위·완료기준 포함)**
+
+## 4. 현재 구현 상태 (v0.2 — 마일스톤 v0.2 + 인프라 완료)
+구현됨:
+- 커맨드: `check_claude`, `setup_environment`(전문가 5종 + **스킬 3종** 설치 + 팀 플래그 + **안전/품질 훅 4종**),
+  `create_agent`(worktree 생성 → `claude -p` 스트리밍, **agent 옵션으로 전문가 위임**), `list_agents`, `get_diff`,
+  `stop_agent`, `cleanup_agent`(되돌리기), **`commit_agent`(적용하기)**, **`set_cost_cap`/`get_cost_cap`(비용 상한)**.
+- **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
+  `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
+  Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.
+- **스킬(T2)**: `src-tauri/skills/{git-master,test-writer,frontend-ui}/SKILL.md` → `~/.claude/skills/`. 전문가의 `skills:` 필드와 연결.
+- **적용하기(T3)**: `commit_agent(id,message)` — worktree(ab/<branch>)에서 `add -A && commit`. 메시지 비우면 부탁 내용으로 기본 메시지. UI 카드에 `[적용하기]`.
+- **레시피→전문가(T4)**: RECIPES에 `agent` 매핑(bug→debugger, feature/test→implementer, explain→librarian). `create_agent`가 프롬프트에 위임 지시 주입.
+- **비용 가드(T5)**: 누적 cost ≥ 상한 시 실행 중 에이전트 자동 정지 + `cost_capped` 이벤트(1회). UI 헤더에 상한 입력 + 경고 배너 + 80% 도달 시 미터 경고색.
+- **CI/Pages(인프라)**: `.github/workflows/build.yml`(클라우드 멀티OS 빌드 → Artifacts, 제어 정책 우회), `pages.yml`(ui/ 데모 배포).
+  `ui/main.js`에 **데모 모드 폴백**(`window.__TAURI__` 부재 시 목업 — 브라우저에서 화면 체험).
+- UI: 온보딩 3단계, 폴더 선택(dialog), 레시피 4종, 꼼꼼함 슬라이더(haiku/sonnet/opus),
+  실시간 진행 카드, 바뀐 점 모달, 적용하기/멈추기/되돌리기, 사용량 합계 + 상한, 데모 배지.
+
+**아직 안 된 것(다음 — ROADMAP v1):**
+- **실제 에이전트 팀(lead+teammates) 오케스트레이션**(V1.1) — 지금은 단일 `claude -p`에 전문가 위임까지.
+- **미리보기(포트)**(V1.2), **작업 공간 영속화/복원**(V1.3), **권한 UI**(V1.4), **단일 설치형 배포 검증**(V1.5).
+- MCP 설치(V2.2).
+
+> 빌드 주의: 로컬 Windows에서 Smart App Control/WDAC가 `cargo` 빌드스크립트 실행을 막을 수 있음(`os error 4551`).
+> 이 경우 `docs/SETUP-GUIDE.md`의 GitHub Actions 클라우드 빌드 경로를 사용.
+
+## 5. 코딩 컨벤션 / 주의
+- **Tauri v2** API만 사용(`tauri::{Manager, Emitter}`, `app.emit`, `app.state`).
+- 커맨드 파라미터는 **단어 하나(소문자)** 로 유지해 camelCase↔snake_case 혼선을 피한다(`repo, prompt, id` 등).
+- 새 이벤트를 추가하면 **Rust emit과 JS listen을 같이** 바꾼다.
+- 무거운 작업은 **별도 스레드**에서(`create_agent` 패턴 참고). 커맨드는 빨리 반환.
+- Windows에서 `claude`는 `.cmd`라 **`cmd /C claude …`** 로 호출(`claude_command()` 참고).
+- UI 문구는 **일반인용 쉬운 한국어**(전문용어 금지: diff→"바뀐 점", commit→"변경 저장", PR→"제안 보내기").
+- PowerShell 스크립트를 새로 만들면 **UTF-8 BOM**으로 저장(한글 깨짐 방지).
+
+## 6. 실행 / 검증
+```bash
+npm install
+npm run dev      # tauri dev
+npm run build    # 배포 빌드
+```
+빌드 없이 빠른 점검:
+```bash
+node --check ui/main.js
+node -e "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json','utf8'))"
+```
+사전 조건: Rust, Node 18+, git, **Claude Code 설치+로그인**, OS별 Tauri 의존성(README 참고).
+
+## 7. 이어서 작업하는 법 (이 프로젝트에서)
+1. `docs/ROADMAP.md`의 최상단(다음 마일스톤) 작업을 선택한다.
+2. **격리해서** 작업한다: `claude --worktree <기능명>` 또는 데스크톱 앱의 새 세션.
+3. 변경 후 6장의 검증을 돌리고, 가능하면 `npm run dev`로 수동 확인.
+4. 1장의 안전 원칙을 절대 위반하지 않는다.
+5. 완료 시 이 문서의 "현재 구현 상태"와 ROADMAP 체크박스를 갱신한다.
+
+## 8. 참고 문서(외부)
+- Claude Code: worktrees / sub-agents / agent-teams / hooks / skills / headless(`claude -p`) — code.claude.com
+- 본 프로젝트 기획: "ClaudeCrew 기획보고서", 부록 A "Skills·Hooks 설정 셋업"(별도 docx)

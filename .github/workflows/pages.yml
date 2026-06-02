@@ -1,0 +1,35 @@
+name: pages
+
+# ui/ 폴더(데모 모드 폴백 포함)를 GitHub Pages 로 배포한다.
+# 실제 앱이 아니라 '화면 미리보기' 데모다(백엔드 없음).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "ui/**"
+      - ".github/workflows/pages.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ui
+      - id: deployment
+        uses: actions/deploy-pages@v4

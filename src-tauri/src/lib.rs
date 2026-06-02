@@ -1,0 +1,668 @@
+// ClaudeCrew — Tauri 백엔드
+// 안전 원칙: 공식 `claude` 바이너리를 헤드리스(claude -p)로 구동만 한다.
+// 자격증명을 만지거나 인증을 위조하지 않는다. 각 작업은 격리된 git worktree에서 실행.
+
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::sync::Mutex;
+
+use serde::Serialize;
+use serde_json::Value;
+use tauri::{AppHandle, Emitter, Manager};
+
+// ---------------- 상태 ----------------
+#[derive(Clone, Serialize)]
+struct AgentInfo {
+    id: String,
+    repo: String,
+    branch: String,
+    prompt: String,
+    model: String,
+    permission: String,
+    worktree: String,
+    status: String,        // creating | running | done | error | stopped
+    cost: Option<f64>,
+    pid: Option<u32>,
+}
+
+struct AppState {
+    agents: Mutex<HashMap<String, AgentInfo>>,
+    counter: Mutex<u32>,
+    cost_cap: Mutex<f64>, // 0 이하 = 끔
+    capped: Mutex<bool>,  // 상한 도달 알림을 한 번만 보내기 위한 플래그
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            agents: Mutex::new(HashMap::new()),
+            counter: Mutex::new(0),
+            cost_cap: Mutex::new(5.0),
+            capped: Mutex::new(false),
+        }
+    }
+}
+
+// ---------------- 유틸 ----------------
+fn sanitize(s: &str) -> String {
+    let cleaned: String = s
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' { c } else { '-' })
+        .collect();
+    cleaned.chars().take(60).collect()
+}
+
+fn home_dir() -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into()))
+    } else {
+        PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+    }
+}
+
+// Windows에서는 .cmd 실행을 위해 cmd /C 래퍼가 필요하다.
+fn claude_command(args: &[String]) -> Command {
+    if cfg!(windows) {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg("claude");
+        for a in args {
+            c.arg(a);
+        }
+        c
+    } else {
+        let mut c = Command::new("claude");
+        for a in args {
+            c.arg(a);
+        }
+        c
+    }
+}
+
+fn git(repo: &str, args: &[&str]) -> Result<String, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .map_err(|e| format!("git 실행 실패: {e}"))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).to_string())
+    }
+}
+
+// stream-json 이벤트에서 사람이 읽을 텍스트만 추출
+fn extract_text(evt: &Value) -> Option<String> {
+    let t = evt.get("type")?.as_str()?;
+    match t {
+        "system" => {
+            if evt.get("subtype").and_then(|v| v.as_str()) == Some("init") {
+                Some("▶ 세션 시작".into())
+            } else {
+                None
+            }
+        }
+        "assistant" => {
+            let content = evt.get("message")?.get("content")?.as_array()?;
+            let mut parts = Vec::new();
+            for b in content {
+                match b.get("type").and_then(|v| v.as_str()) {
+                    Some("text") => {
+                        if let Some(s) = b.get("text").and_then(|v| v.as_str()) {
+                            parts.push(s.to_string());
+                        }
+                    }
+                    Some("tool_use") => {
+                        let name = b.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
+                        parts.push(format!("🔧 {name}"));
+                    }
+                    _ => {}
+                }
+            }
+            if parts.is_empty() { None } else { Some(parts.join("\n")) }
+        }
+        _ => None,
+    }
+}
+
+// ---------------- 커맨드: Claude 설치 확인 ----------------
+#[tauri::command]
+fn check_claude() -> Result<String, String> {
+    let out = claude_command(&["--version".into()])
+        .output()
+        .map_err(|e| format!("claude 실행 실패: {e}"))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err("claude 명령을 찾지 못했습니다. Claude Code 설치/로그인을 확인하세요.".into())
+    }
+}
+
+// ---------------- 커맨드: 온보딩 환경 설정 ----------------
+// ~/.claude 에 전문가(서브에이전트) 설치 + 에이전트 팀 플래그 활성화
+#[tauri::command]
+fn setup_environment() -> Result<String, String> {
+    let claude_dir = home_dir().join(".claude");
+    let agents_dir = claude_dir.join("agents");
+    std::fs::create_dir_all(&agents_dir).map_err(|e| e.to_string())?;
+
+    // settings.json 병합 (팀 플래그)
+    let settings_path = claude_dir.join("settings.json");
+    let mut settings: Value = if settings_path.exists() {
+        let raw = std::fs::read_to_string(&settings_path).unwrap_or_else(|_| "{}".into());
+        serde_json::from_str(&raw).unwrap_or(Value::Object(Default::default()))
+    } else {
+        Value::Object(Default::default())
+    };
+    if !settings.is_object() {
+        settings = Value::Object(Default::default());
+    }
+    if !settings.get("env").map(|v| v.is_object()).unwrap_or(false) {
+        settings["env"] = Value::Object(Default::default());
+    }
+    settings["env"]["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = Value::String("1".into());
+
+    // 훅 설치 + settings.hooks 병합
+    install_hooks(&claude_dir, &mut settings)?;
+
+    std::fs::write(
+        &settings_path,
+        serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+
+    // 전문가 설치
+    let agents: [(&str, &str); 5] = [
+        ("oracle.md", include_str!("../agents/oracle.md")),
+        ("librarian.md", include_str!("../agents/librarian.md")),
+        ("implementer.md", include_str!("../agents/implementer.md")),
+        ("debugger.md", include_str!("../agents/debugger.md")),
+        ("code-reviewer.md", include_str!("../agents/code-reviewer.md")),
+    ];
+    for (name, body) in agents {
+        std::fs::write(agents_dir.join(name), body).map_err(|e| e.to_string())?;
+    }
+
+    // 스킬 설치 (~/.claude/skills/<name>/SKILL.md)
+    let skills_dir = claude_dir.join("skills");
+    let skills: [(&str, &str); 3] = [
+        ("git-master", include_str!("../skills/git-master/SKILL.md")),
+        ("test-writer", include_str!("../skills/test-writer/SKILL.md")),
+        ("frontend-ui", include_str!("../skills/frontend-ui/SKILL.md")),
+    ];
+    for (name, body) in skills {
+        let dir = skills_dir.join(name);
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        std::fs::write(dir.join("SKILL.md"), body).map_err(|e| e.to_string())?;
+    }
+
+    Ok("준비 완료: 전문가 5종 + 스킬 3종 설치 + 팀 기능 활성화 + 안전/품질 훅 4종 설치".into())
+}
+
+// ~/.claude/claudecrew-hooks 에 OS별 훅 스크립트(두 벌)를 기록하고,
+// 현재 OS용 절대경로를 settings.hooks 에 idempotent 하게 병합한다.
+// exit code 규칙: 0=진행, 2=차단/계속.
+fn install_hooks(claude_dir: &std::path::Path, settings: &mut Value) -> Result<(), String> {
+    let hooks_dir = claude_dir.join("claudecrew-hooks");
+    std::fs::create_dir_all(&hooks_dir).map_err(|e| e.to_string())?;
+
+    // Windows PowerShell + Unix bash 두 벌을 모두 기록(부록 A: OS 분기)
+    let ps_scripts: [(&str, &str); 4] = [
+        ("pretooluse-bash.ps1", include_str!("../hooks/pretooluse-bash.ps1")),
+        ("posttooluse-format.ps1", include_str!("../hooks/posttooluse-format.ps1")),
+        ("stop-continue.ps1", include_str!("../hooks/stop-continue.ps1")),
+        ("taskcompleted-test.ps1", include_str!("../hooks/taskcompleted-test.ps1")),
+    ];
+    let sh_scripts: [(&str, &str); 4] = [
+        ("pretooluse-bash.sh", include_str!("../hooks/pretooluse-bash.sh")),
+        ("posttooluse-format.sh", include_str!("../hooks/posttooluse-format.sh")),
+        ("stop-continue.sh", include_str!("../hooks/stop-continue.sh")),
+        ("taskcompleted-test.sh", include_str!("../hooks/taskcompleted-test.sh")),
+    ];
+    // PowerShell 스크립트는 UTF-8 BOM으로 기록(한글 깨짐 방지)
+    for (name, body) in ps_scripts {
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(body.as_bytes());
+        std::fs::write(hooks_dir.join(name), bytes).map_err(|e| e.to_string())?;
+    }
+    for (name, body) in sh_scripts {
+        let p = hooks_dir.join(name);
+        std::fs::write(&p, body).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    // 현재 OS용 훅 실행 명령(절대경로)
+    let script_cmd = |stem: &str| -> String {
+        let ext = if cfg!(windows) { "ps1" } else { "sh" };
+        let p = hooks_dir.join(format!("{stem}.{ext}"));
+        let p = p.to_string_lossy().to_string();
+        if cfg!(windows) {
+            format!("powershell -NoProfile -ExecutionPolicy Bypass -File \"{p}\"")
+        } else {
+            format!("bash \"{p}\"")
+        }
+    };
+
+    // settings.hooks 보장
+    if !settings.get("hooks").map(|v| v.is_object()).unwrap_or(false) {
+        settings["hooks"] = Value::Object(Default::default());
+    }
+
+    // 이전 ClaudeCrew 항목(경로에 claudecrew-hooks 포함)을 지우고 새로 등록 → idempotent
+    let marker = "claudecrew-hooks";
+    let add_hook = |settings: &mut Value, event: &str, matcher: Option<&str>, command: String| {
+        let arr = settings["hooks"]
+            .as_object_mut()
+            .unwrap()
+            .entry(event.to_string())
+            .or_insert_with(|| Value::Array(vec![]));
+        if !arr.is_array() {
+            *arr = Value::Array(vec![]);
+        }
+        let list = arr.as_array_mut().unwrap();
+        list.retain(|grp| {
+            !grp.get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|hs| {
+                    hs.iter().any(|hk| {
+                        hk.get("command")
+                            .and_then(|c| c.as_str())
+                            .map(|c| c.contains(marker))
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false)
+        });
+        let mut group = serde_json::Map::new();
+        if let Some(m) = matcher {
+            group.insert("matcher".into(), Value::String(m.into()));
+        }
+        group.insert(
+            "hooks".into(),
+            serde_json::json!([{ "type": "command", "command": command }]),
+        );
+        list.push(Value::Object(group));
+    };
+
+    add_hook(settings, "PreToolUse", Some("Bash"), script_cmd("pretooluse-bash"));
+    add_hook(settings, "PostToolUse", Some("Write|Edit"), script_cmd("posttooluse-format"));
+    add_hook(settings, "Stop", None, script_cmd("stop-continue"));
+    add_hook(settings, "TeammateIdle", None, script_cmd("stop-continue"));
+    add_hook(settings, "TaskCompleted", None, script_cmd("taskcompleted-test"));
+
+    Ok(())
+}
+
+// ---------------- 커맨드: 에이전트 생성/실행 ----------------
+#[tauri::command]
+fn create_agent(
+    app: AppHandle,
+    repo: String,
+    prompt: String,
+    model: String,
+    permission: String,
+    branch: Option<String>,
+    agent: Option<String>,
+) -> Result<String, String> {
+    if !PathBuf::from(&repo).join(".git").exists() {
+        return Err(format!("선택한 폴더가 git 프로젝트가 아닙니다: {repo}"));
+    }
+
+    let state = app.state::<AppState>();
+    let id = {
+        let mut c = state.counter.lock().unwrap();
+        *c += 1;
+        format!("a{}", *c)
+    };
+    let branch = sanitize(&branch.unwrap_or_else(|| format!("task-{id}")));
+    let worktree = PathBuf::from(&repo)
+        .join(".agentboard")
+        .join(&branch)
+        .to_string_lossy()
+        .to_string();
+
+    let info = AgentInfo {
+        id: id.clone(),
+        repo: repo.clone(),
+        branch: branch.clone(),
+        prompt: prompt.clone(),
+        model: model.clone(),
+        permission: permission.clone(),
+        worktree: worktree.clone(),
+        status: "creating".into(),
+        cost: None,
+        pid: None,
+    };
+    state.agents.lock().unwrap().insert(id.clone(), info.clone());
+    let _ = app.emit("agent_update", info);
+
+    // 지정 전문가가 있으면 프롬프트에 위임 지시를 주입(표시용 prompt는 원문 유지)
+    let effective_prompt = match agent.as_deref() {
+        Some(name) if !name.is_empty() => format!(
+            "다음 작업을 `{name}` 전문가(서브에이전트)에게 위임해 끝까지 처리하고, 끝나면 무엇을 했는지 한국어로 요약하세요:\n\n{prompt}"
+        ),
+        _ => prompt,
+    };
+
+    // 무거운 작업은 별도 스레드에서
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        run_agent(app2, id, repo, effective_prompt, model, permission, branch, worktree);
+    });
+
+    Ok(id)
+}
+
+fn set_status(app: &AppHandle, id: &str, status: &str) {
+    let state = app.state::<AppState>();
+    let mut map = state.agents.lock().unwrap();
+    if let Some(a) = map.get_mut(id) {
+        a.status = status.into();
+        let _ = app.emit("agent_update", a.clone());
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_agent(
+    app: AppHandle,
+    id: String,
+    repo: String,
+    prompt: String,
+    model: String,
+    permission: String,
+    branch: String,
+    worktree: String,
+) {
+    // 1) worktree 생성
+    std::fs::create_dir_all(PathBuf::from(&repo).join(".agentboard")).ok();
+    let created = git(&repo, &["worktree", "add", "-b", &format!("ab/{branch}"), &worktree, "HEAD"])
+        .or_else(|_| git(&repo, &["worktree", "add", &worktree, "HEAD"]));
+    if let Err(e) = created {
+        emit_output(&app, &id, &format!("[작업 공간 생성 실패] {e}"));
+        set_status(&app, &id, "error");
+        return;
+    }
+
+    set_status(&app, &id, "running");
+
+    // 2) claude -p 헤드리스 실행
+    let args: Vec<String> = vec![
+        "-p".into(),
+        prompt,
+        "--output-format".into(),
+        "stream-json".into(),
+        "--verbose".into(),
+        "--model".into(),
+        model,
+        "--permission-mode".into(),
+        permission,
+    ];
+    let mut cmd = claude_command(&args);
+    cmd.current_dir(&worktree)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            emit_output(&app, &id, &format!("[claude 실행 실패] {e} — 설치/로그인을 확인하세요."));
+            set_status(&app, &id, "error");
+            return;
+        }
+    };
+
+    // pid 저장 (중지용)
+    {
+        let state = app.state::<AppState>();
+        if let Some(a) = state.agents.lock().unwrap().get_mut(&id) {
+            a.pid = Some(child.id());
+        }
+    }
+
+    // stderr 드레인 스레드
+    if let Some(err) = child.stderr.take() {
+        let app_e = app.clone();
+        let id_e = id.clone();
+        std::thread::spawn(move || {
+            let reader = BufReader::new(err);
+            for line in reader.lines().map_while(Result::ok) {
+                if !line.trim().is_empty() {
+                    emit_output(&app_e, &id_e, &format!("[알림] {line}"));
+                }
+            }
+        });
+    }
+
+    // stdout 라인 단위 파싱 → 이벤트
+    if let Some(out) = child.stdout.take() {
+        let reader = BufReader::new(out);
+        for line in reader.lines().map_while(Result::ok) {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<Value>(line) {
+                Ok(evt) => {
+                    if evt.get("type").and_then(|v| v.as_str()) == Some("result") {
+                        if let Some(cost) = evt.get("total_cost_usd").and_then(|v| v.as_f64()) {
+                            {
+                                let state = app.state::<AppState>();
+                                if let Some(a) = state.agents.lock().unwrap().get_mut(&id) {
+                                    a.cost = Some(cost);
+                                }
+                            }
+                            check_cost_cap(&app);
+                        }
+                        if let Some(r) = evt.get("result").and_then(|v| v.as_str()) {
+                            emit_output(&app, &id, r);
+                        }
+                    } else if let Some(t) = extract_text(&evt) {
+                        emit_output(&app, &id, &t);
+                    }
+                }
+                Err(_) => emit_output(&app, &id, line),
+            }
+        }
+    }
+
+    let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+    set_status(&app, &id, if ok { "done" } else { "error" });
+    // done 이벤트(비용 포함)
+    let state = app.state::<AppState>();
+    if let Some(a) = state.agents.lock().unwrap().get(&id) {
+        let _ = app.emit("agent_done", a.clone());
+    }
+}
+
+fn emit_output(app: &AppHandle, id: &str, text: &str) {
+    let _ = app.emit(
+        "agent_output",
+        serde_json::json!({ "id": id, "text": text }),
+    );
+}
+
+// ---------------- 커맨드: 목록 ----------------
+#[tauri::command]
+fn list_agents(app: AppHandle) -> Vec<AgentInfo> {
+    let state = app.state::<AppState>();
+    state.agents.lock().unwrap().values().cloned().collect()
+}
+
+// ---------------- 커맨드: 바뀐 점(diff) ----------------
+#[tauri::command]
+fn get_diff(app: AppHandle, id: String) -> Result<String, String> {
+    let state = app.state::<AppState>();
+    let worktree = state
+        .agents
+        .lock()
+        .unwrap()
+        .get(&id)
+        .map(|a| a.worktree.clone())
+        .ok_or("없는 작업")?;
+    // 격리 worktree라 staging 부작용 없음 → 새 파일 포함 diff
+    git(&worktree, &["add", "-A"]).ok();
+    let diff = git(&worktree, &["diff", "--cached"]).unwrap_or_default();
+    Ok(if diff.trim().is_empty() { "(바뀐 점 없음)".into() } else { diff })
+}
+
+// ---------------- 커맨드: 중지 ----------------
+fn kill_pid(pid: u32) {
+    if cfg!(windows) {
+        let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).output();
+    } else {
+        let _ = Command::new("kill").arg(pid.to_string()).output();
+    }
+}
+
+#[tauri::command]
+fn stop_agent(app: AppHandle, id: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let pid = state.agents.lock().unwrap().get(&id).and_then(|a| a.pid);
+    if let Some(pid) = pid {
+        kill_pid(pid);
+    }
+    set_status(&app, &id, "stopped");
+    Ok(())
+}
+
+// ---------------- 비용 가드(상한·자동 정지) ----------------
+#[tauri::command]
+fn set_cost_cap(app: AppHandle, value: f64) {
+    let state = app.state::<AppState>();
+    *state.cost_cap.lock().unwrap() = value.max(0.0);
+    *state.capped.lock().unwrap() = false; // 상한을 바꾸면 알림 재무장
+}
+
+#[tauri::command]
+fn get_cost_cap(app: AppHandle) -> f64 {
+    *app.state::<AppState>().cost_cap.lock().unwrap()
+}
+
+// 누적 비용이 상한에 도달하면 진행 중 작업을 멈추고 한 번만 알린다.
+fn check_cost_cap(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let cap = *state.cost_cap.lock().unwrap();
+    if cap <= 0.0 {
+        return;
+    }
+    let total: f64 = {
+        let map = state.agents.lock().unwrap();
+        map.values().filter_map(|a| a.cost).sum()
+    };
+    if total < cap {
+        return;
+    }
+    // 한 번만 발동
+    {
+        let mut c = state.capped.lock().unwrap();
+        if *c {
+            return;
+        }
+        *c = true;
+    }
+    // 진행 중/준비 중 에이전트 정지 (락을 잡은 채 프로세스를 죽이지 않도록 분리)
+    let to_stop: Vec<(String, u32)> = {
+        let map = state.agents.lock().unwrap();
+        map.values()
+            .filter(|a| a.status == "running" || a.status == "creating")
+            .filter_map(|a| a.pid.map(|p| (a.id.clone(), p)))
+            .collect()
+    };
+    for (id, pid) in &to_stop {
+        kill_pid(*pid);
+        set_status(app, id, "stopped");
+    }
+    let _ = app.emit(
+        "cost_capped",
+        serde_json::json!({ "total": total, "cap": cap }),
+    );
+}
+
+// ---------------- 커맨드: 정리(되돌리기) ----------------
+#[tauri::command]
+fn cleanup_agent(app: AppHandle, id: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let (repo, worktree, pid) = {
+        let map = state.agents.lock().unwrap();
+        let a = map.get(&id).ok_or("없는 작업")?;
+        (a.repo.clone(), a.worktree.clone(), a.pid)
+    };
+    if let Some(pid) = pid {
+        kill_pid(pid);
+    }
+    let _ = git(&repo, &["worktree", "remove", "--force", &worktree]);
+    state.agents.lock().unwrap().remove(&id);
+    let _ = app.emit("agent_removed", serde_json::json!({ "id": id }));
+    Ok(())
+}
+
+// ---------------- 커맨드: 적용하기(변경 저장/commit) ----------------
+// 격리된 worktree(ab/<branch>)에서만 커밋한다. 메인 브랜치를 직접 바꾸지 않는다(안전 원칙).
+#[tauri::command]
+fn commit_agent(app: AppHandle, id: String, message: String) -> Result<String, String> {
+    let state = app.state::<AppState>();
+    let (worktree, prompt) = {
+        let map = state.agents.lock().unwrap();
+        let a = map.get(&id).ok_or("없는 작업")?;
+        (a.worktree.clone(), a.prompt.clone())
+    };
+
+    // 메시지 미입력 시 부탁 내용으로 기본 메시지 구성(git-master 스킬 연계는 추후)
+    let msg = if message.trim().is_empty() {
+        let short: String = prompt.trim().chars().take(50).collect();
+        format!("ClaudeCrew: {short}")
+    } else {
+        message
+    };
+
+    git(&worktree, &["add", "-A"])?;
+    let staged = git(&worktree, &["diff", "--cached", "--name-only"]).unwrap_or_default();
+    if staged.trim().is_empty() {
+        return Err("저장할 바뀐 점이 없습니다.".into());
+    }
+    git(
+        &worktree,
+        &[
+            "-c",
+            "user.name=ClaudeCrew",
+            "-c",
+            "user.email=claudecrew@local",
+            "commit",
+            "-m",
+            msg.as_str(),
+        ],
+    )?;
+    let hash = git(&worktree, &["rev-parse", "--short", "HEAD"]).unwrap_or_default();
+    set_status(&app, &id, "committed");
+    Ok(format!("저장됨: {} ({})", msg, hash.trim()))
+}
+
+// ---------------- 진입점 ----------------
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
+        .manage(AppState::default())
+        .invoke_handler(tauri::generate_handler![
+            check_claude,
+            setup_environment,
+            create_agent,
+            list_agents,
+            get_diff,
+            stop_agent,
+            cleanup_agent,
+            commit_agent,
+            set_cost_cap,
+            get_cost_cap
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

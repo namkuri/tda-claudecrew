@@ -1,0 +1,15 @@
+{
+  "name": "claudecrew",
+  "version": "0.1.0",
+  "private": true,
+  "description": "누구나 쓰는 Claude 에이전트 오케스트레이션 데스크톱 앱 (Tauri)",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "icon": "tauri icon ./app-icon.png"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

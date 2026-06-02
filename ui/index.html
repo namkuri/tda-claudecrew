@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ClaudeCrew</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- 온보딩 -->
+<div id="onboarding" class="overlay">
+  <div class="wizard">
+    <div class="brand">Claude<b>Crew</b></div>
+    <p class="lead">AI 전문가 팀에게 일을 맡기는 가장 쉬운 길.<br/>3단계만 따라오면 준비 끝!</p>
+
+    <div class="step" id="step1">
+      <div class="num">1</div>
+      <div class="body">
+        <h3>Claude 준비 확인</h3>
+        <p class="muted">컴퓨터에 Claude Code가 설치·로그인되어 있는지 확인해요.</p>
+        <button class="btn" id="btnCheck">확인하기</button>
+        <span class="status" id="checkStatus"></span>
+      </div>
+    </div>
+
+    <div class="step" id="step2">
+      <div class="num">2</div>
+      <div class="body">
+        <h3>작업할 폴더 고르기</h3>
+        <p class="muted">AI가 작업할 프로젝트 폴더를 골라요.</p>
+        <button class="btn" id="btnFolder">폴더 선택</button>
+        <span class="status" id="folderStatus"></span>
+      </div>
+    </div>
+
+    <div class="step" id="step3">
+      <div class="num">3</div>
+      <div class="body">
+        <h3>준비 완료</h3>
+        <p class="muted">전문가 팀을 설치하고 안전 설정을 켜요. (자동)</p>
+        <button class="btn" id="btnSetup">전문가 설치</button>
+        <span class="status" id="setupStatus"></span>
+      </div>
+    </div>
+
+    <button class="btn go" id="btnStart" disabled>시작하기 →</button>
+  </div>
+</div>
+
+<!-- 메인 -->
+<div id="app" class="hidden">
+  <header>
+    <div class="brand sm">Claude<b>Crew</b></div>
+    <div class="folder" id="folderLabel">폴더 없음</div>
+    <button class="chip" id="btnChangeFolder">폴더 변경</button>
+    <div class="spacer"></div>
+    <label class="capctl" title="이번 세션 비용이 이 금액에 닿으면 진행 중인 작업을 자동으로 멈춰요">상한 $<input id="costCap" type="number" min="0" step="0.5" value="5" /></label>
+    <div class="meter" title="이번 세션 예상 사용량">사용량 <b id="costTotal">$0.00</b></div>
+  </header>
+
+  <div id="costBanner" class="banner hidden"></div>
+
+  <section class="composer">
+    <div class="recipes">
+      <button class="recipe" data-r="bug">🐞 버그 고치기</button>
+      <button class="recipe" data-r="feature">✨ 기능 추가</button>
+      <button class="recipe" data-r="explain">📖 코드 설명</button>
+      <button class="recipe" data-r="test">🧪 테스트 만들기</button>
+    </div>
+    <textarea id="prompt" placeholder="무엇을 부탁할까요? 예) 로그인 버튼이 안 눌려요. 고쳐주세요."></textarea>
+    <div class="controls">
+      <label>꼼꼼함
+        <select id="speed">
+          <option value="haiku">빠르게</option>
+          <option value="sonnet" selected>보통</option>
+          <option value="opus">꼼꼼하게</option>
+        </select>
+      </label>
+      <span class="safe">🔒 안전: 이 폴더 안에서만 작업해요</span>
+      <button class="btn go" id="btnRun">▶ 전문가에게 맡기기</button>
+    </div>
+  </section>
+
+  <main id="board">
+    <div class="empty" id="emptyMsg">아직 맡긴 일이 없어요. 위에서 레시피를 고르거나 부탁을 적고 ▶ 를 눌러보세요.</div>
+  </main>
+</div>
+
+<!-- 바뀐 점 -->
+<div class="overlay hidden" id="diffModal">
+  <div class="sheet">
+    <div class="sheet-h"><b id="diffTitle">바뀐 점</b><span class="x" id="diffClose">✕ 닫기</span></div>
+    <pre id="diffBody"></pre>
+  </div>
+</div>
+
+<script src="main.js"></script>
+</body>
+</html>
