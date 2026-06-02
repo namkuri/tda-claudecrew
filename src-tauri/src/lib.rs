@@ -909,6 +909,10 @@ fn process_teammates(app: &AppHandle, agent_id: &str, evt: &Value, map: &mut Has
                 .and_then(|m| m.get("content"))
                 .and_then(|c| c.as_array())
             {
+                // 부모 메시지의 모델(예: 'claude-sonnet-4-6') — 서브에이전트의 모델 힌트로 함께 전달
+                let parent_model = evt.get("message")
+                    .and_then(|m| m.get("model"))
+                    .and_then(|v| v.as_str()).unwrap_or("");
                 for b in content {
                     if b.get("type").and_then(|v| v.as_str()) == Some("tool_use")
                         && b.get("name").and_then(|v| v.as_str()) == Some("Task")
@@ -921,18 +925,26 @@ fn process_teammates(app: &AppHandle, agent_id: &str, evt: &Value, map: &mut Has
                             .or_else(|| input.and_then(|i| i.get("description")).and_then(|v| v.as_str()))
                             .unwrap_or("전문가")
                             .to_string();
-                        let desc_full = input
-                            .and_then(|i| i.get("description"))
-                            .and_then(|v| v.as_str())
-                            .or_else(|| input.and_then(|i| i.get("prompt")).and_then(|v| v.as_str()))
-                            .unwrap_or("");
-                        let desc: String = desc_full.chars().take(180).collect();
+                        // description(왜 부르는지) + prompt(무엇을 시키는지) 둘 다 노출
+                        let desc_short: String = input.and_then(|i| i.get("description"))
+                            .and_then(|v| v.as_str()).unwrap_or("").chars().take(160).collect();
+                        let prompt_short: String = input.and_then(|i| i.get("prompt"))
+                            .and_then(|v| v.as_str()).unwrap_or("").chars().take(400).collect();
+                        let started_at_ms: i64 = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
                         if !tuid.is_empty() {
                             map.insert(tuid, name.clone());
                         }
                         let _ = app.emit(
                             "teammate_update",
-                            serde_json::json!({ "agentId": agent_id, "name": name, "desc": desc, "status": "working" }),
+                            serde_json::json!({
+                                "agentId": agent_id, "name": name,
+                                "desc": desc_short,
+                                "prompt": prompt_short,
+                                "model": parent_model,
+                                "startedAt": started_at_ms,
+                                "status": "working"
+                            }),
                         );
                     }
                 }
@@ -956,13 +968,16 @@ fn process_teammates(app: &AppHandle, agent_id: &str, evt: &Value, map: &mut Has
                                 }).unwrap_or_default();
                                 let is_error = b.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
                                 let snippet: String = result_text.chars().take(220).collect();
+                                let ended_at_ms: i64 = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
                                 let _ = app.emit(
                                     "teammate_update",
                                     serde_json::json!({
                                         "agentId": agent_id, "name": name, "desc": "",
                                         "result": snippet,
                                         "status": if is_error { "error" } else { "done" },
-                                        "isError": is_error
+                                        "isError": is_error,
+                                        "endedAt": ended_at_ms
                                     }),
                                 );
                             }

@@ -76,6 +76,10 @@ const I18N = {
     verify: "🧪 자동 검증", verifying: "검증 중…", verifyPass: "검증 통과", verifyFail: "검증 실패",
     verifySkipped: "감지된 빌드 시스템 없음(검증 생략)", verifyFailedTip: "검증 실패 — 그래도 적용하시려면 다시 누르세요.",
     sub_failed: "서브에이전트 실패",
+    sub_why: "왜 호출됐는지 — 오케스트레이터가 부여한 설명", sub_why_lbl: "왜",
+    sub_what_lbl: "무엇을 시켰나(전체 지시 펼치기)",
+    subs_title: "호출된 전문가(서브에이전트)",
+    subs_info: "서브에이전트는 '단방향 위임'입니다 — 오케스트레이터가 Task 도구로 한 번 호출하면, 자식 LLM 세션이 독립적으로 처리하고 결과만 돌아옵니다. 사용자가 서브에이전트와 직접 대화할 수 없고, 다시 부르려면 새 Task 호출이 필요합니다. 같은 claude 프로세스 안에서 SDK가 자식 conversation을 관리하므로 별도 CMD/창은 뜨지 않습니다.",
     noDiagInfo: "에이전트가 진단 정보 없이 종료됐어요.",
     noDiagHints: "흔한 원인: (1) Claude Code 로그인 만료 — 터미널에서 `claude` 한 번 실행해 확인  (2) 명령행 인자가 너무 김(Windows 8191자 한도)  (3) PATH에서 claude 못 찾음",
     tokenSrc: "토큰", tokenSub: "구독 플랜", tokenApi: "API 키", tokenTitle: "어떤 토큰으로 청구할지 — 구독(앱 플랜) 또는 API 키",
@@ -148,6 +152,10 @@ const I18N = {
     verify: "🧪 Auto-verify", verifying: "Verifying…", verifyPass: "Verified", verifyFail: "Verification failed",
     verifySkipped: "No detected build system (skipped)", verifyFailedTip: "Verification failed — press Apply again to override.",
     sub_failed: "Sub-agent failed",
+    sub_why: "Why it was called — description from the orchestrator", sub_why_lbl: "Why",
+    sub_what_lbl: "What was asked (expand full prompt)",
+    subs_title: "Delegated experts (sub-agents)",
+    subs_info: "Sub-agents are 'one-way delegations' — the orchestrator calls them once via the Task tool, a child LLM session handles it independently, and only the result comes back. You cannot chat with a sub-agent directly; calling it again requires a new Task call. The SDK manages these child conversations inside the same claude process, so no separate CMD window appears.",
     noDiagInfo: "Agent exited without diagnostic output.",
     noDiagHints: "Common causes: (1) Claude Code login expired — run `claude` once in a terminal  (2) Argv too long (Windows 8191-char limit)  (3) `claude` not on PATH",
     tokenSrc: "Tokens", tokenSub: "Subscription", tokenApi: "API key", tokenTitle: "Which tokens to bill — your subscription (app plan) or an API key",
@@ -209,9 +217,22 @@ function makeDemoApi(){
       : [["debugger","Find root cause: missing handler","onLogin never binds click listener"],
          ["implementer","Implement fix: bind + enable","added btn.addEventListener('click', submit)"],
          ["code-reviewer","Review change: regressions/style","Looks good — recommend applying"]];
+    const expertModels = { debugger: "claude-sonnet-4-6", implementer: "claude-sonnet-4-6", "code-reviewer": "claude-haiku-4-5" };
     crew.forEach(([nm, desc, result], i) => {
-      setTimeout(() => emit("teammate_update", { agentId: id, name: nm, desc, status: "working" }), 1800 + i * 600);
-      setTimeout(() => emit("teammate_update", { agentId: id, name: nm, result, status: "done" }), 3500 + i * 600);
+      const startMs = Date.now() + 1800 + i * 600;
+      const endMs = Date.now() + 3500 + i * 600;
+      setTimeout(() => emit("teammate_update", {
+        agentId: id, name: nm, desc,
+        prompt: `${desc}\n\n구체적 지시: 현재 변경 범위에서 ${nm}로서 결과를 한국어로 짧게 요약.`,
+        model: expertModels[nm] || "claude-sonnet-4-6",
+        startedAt: startMs,
+        status: "working"
+      }), 1800 + i * 600);
+      setTimeout(() => emit("teammate_update", {
+        agentId: id, name: nm, result,
+        endedAt: endMs,
+        status: "done"
+      }), 3500 + i * 600);
     });
     setTimeout(() => { a.port = 5173; a.ctx = 18500; a.tokens_in = 18500; a.tokens_out = 2400; emit("agent_update", { ...a }); }, 3100);
     setTimeout(() => { a.status = "done"; a.cost = 0.0123; a.ctx = 42800; a.tokens_in = 42800; a.tokens_out = 9100; a.session_id = "demo-sess-"+n; emit("agent_done", { ...a }); }, 1700 + sample.length * 600 + 400);
@@ -285,7 +306,36 @@ const RECIPES = {
 };
 
 function esc(s){return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
-function markTool(t){return esc(t).replace(/🔧[^\n]*/g,m=>'<span class="tool">'+m+'</span>');}
+// Claude Code 표준 도구 → 친화 이름(한 줄 설명). 데스크톱 사용자가 'Glob/Bash/Edit'을 보고
+// 무슨 동작인지 즉시 알 수 있도록.
+const TOOL_LABELS = {
+  Read:        { ko: "📖 파일 읽기",       en: "📖 Read file",       hint: "디스크의 파일을 읽어 모델 컨텍스트에 넣음" },
+  Write:       { ko: "✍️ 파일 쓰기",       en: "✍️ Write file",      hint: "새 파일 생성 또는 전체 덮어쓰기" },
+  Edit:        { ko: "✏️ 파일 수정",       en: "✏️ Edit file",       hint: "기존 파일 일부를 교체(diff 형태)" },
+  Bash:        { ko: "💻 명령 실행",       en: "💻 Run command",     hint: "셸 명령(bash/sh) 실행 — 빌드·테스트·git 등" },
+  PowerShell:  { ko: "💻 PowerShell",      en: "💻 PowerShell",      hint: "Windows PowerShell 명령 실행" },
+  Glob:        { ko: "🔍 파일 검색(이름)", en: "🔍 Find files",      hint: "이름 패턴(예: **/*.ts)으로 파일 찾기" },
+  Grep:        { ko: "🔎 코드 검색(내용)", en: "🔎 Search content",  hint: "파일 내용을 정규식으로 검색(ripgrep)" },
+  Task:        { ko: "🧑‍💼 전문가 위임",   en: "🧑‍💼 Delegate",       hint: "서브에이전트(전문가)에게 일을 단방향 위임" },
+  Agent:       { ko: "🧑‍💼 전문가 위임",   en: "🧑‍💼 Delegate",       hint: "서브에이전트 호출" },
+  WebFetch:    { ko: "🌐 웹 가져오기",     en: "🌐 Fetch web",       hint: "URL의 페이지를 가져와 분석" },
+  WebSearch:   { ko: "🌐 웹 검색",         en: "🌐 Web search",      hint: "외부 웹 검색(연결돼 있을 때)" },
+  TodoWrite:   { ko: "🗒 할 일 정리",      en: "🗒 Update todos",    hint: "내부 작업 목록 갱신" },
+  NotebookEdit:{ ko: "📓 노트북 수정",     en: "📓 Edit notebook",   hint: "Jupyter 노트북 셀 수정" },
+};
+function toolLabel(name){
+  const k = lang === "en" ? "en" : "ko";
+  const m = TOOL_LABELS[name];
+  if (m) return { text: `${m[k]} (${name})`, hint: m.hint };
+  return { text: `🔧 ${name}`, hint: "Claude Code 도구 호출" };
+}
+function markTool(t){
+  // 백엔드가 "🔧 ToolName" 형태로 보낸 줄을 라벨링.
+  return esc(t).replace(/🔧 ([A-Za-z]+)/g, (_, name) => {
+    const { text, hint } = toolLabel(name);
+    return `<span class="tool" title="${esc(hint)}">${esc(text)}</span>`;
+  });
+}
 
 // ---------- 언어 토글 ----------
 $("#btnLang").addEventListener("click", () => {
@@ -653,23 +703,50 @@ function renderVerifyPanel(a){
 }
 
 // 서브에이전트 미니 콘솔(CMD 창) 그리드
+function fmtTime(ms){
+  if (!ms) return "";
+  const d = new Date(ms);
+  return d.toLocaleTimeString(lang === "ko" ? "ko-KR" : "en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+function fmtDuration(ms){
+  if (!ms || ms < 0) return "";
+  if (ms < 1000) return ms + "ms";
+  const s = ms / 1000;
+  if (s < 60) return s.toFixed(1) + "s";
+  const m = Math.floor(s / 60), sec = Math.round(s % 60);
+  return `${m}m ${sec}s`;
+}
+
 function renderSubConsoles(a){
   const tm = a.teammates; if (!tm || !Object.keys(tm).length) return "";
   const cards = Object.keys(tm).map(name => {
     const m = mate(tm, name);
     const cls = m.isError ? "error" : m.status;
     const headIcon = m.isError ? "✗ error" : (m.status === "done" ? "✓ done" : "● working");
-    const body = m.isError
-      ? `<span style="color:var(--err)">❌ ${esc(m.result || t("sub_failed"))}</span>`
+    const dur = (m.startedAt && m.endedAt) ? fmtDuration(m.endedAt - m.startedAt)
+              : (m.startedAt ? fmtDuration(Date.now() - m.startedAt) : "");
+    const startStr = fmtTime(m.startedAt);
+    // 메타 1줄: 모델·시작시각·소요. 모델 없으면 부모 동일 표시
+    const meta = [m.model ? esc(m.model) : "", startStr ? "⏱ " + startStr : "", dur ? "· " + dur : ""].filter(Boolean).join(" ");
+    // '왜' = description, '무엇' = prompt(있으면 표시), '결과' = result
+    const why = m.desc ? `<div class="sub-why" title="${esc(t("sub_why"))}">${esc(t("sub_why_lbl"))}: ${esc(m.desc)}</div>` : "";
+    const what = m.prompt ? `<details class="sub-what"><summary>${esc(t("sub_what_lbl"))}</summary><pre>${esc(m.prompt)}</pre></details>` : "";
+    const resultHtml = m.isError
+      ? `<div class="sub-result err">❌ ${esc(m.result || t("sub_failed"))}</div>`
       : (m.status === "done"
-          ? (m.result ? esc(m.result) : "✓ " + t("sub_done"))
-          : (m.desc ? esc(m.desc) : t("sub_working")));
+          ? (m.result ? `<div class="sub-result">${esc(m.result)}</div>` : `<div class="sub-result muted">✓ ${esc(t("sub_done"))}</div>`)
+          : `<div class="sub-result muted">${esc(t("sub_working"))}</div>`);
     return `<div class="console sub ${cls}">
-      <div class="con-head"><span class="con-dot ${cls}"></span>${esc(name)}<span class="con-st">${headIcon}</span></div>
-      <div class="con-body">${body}</div>
+      <div class="con-head"><span class="con-dot ${cls}"></span><b>${esc(name)}</b><span class="con-st">${headIcon}</span></div>
+      ${meta ? `<div class="sub-meta">${meta}</div>` : ""}
+      ${why}
+      ${what}
+      ${resultHtml}
     </div>`;
   }).join("");
-  return `<div class="subs">${cards}</div>`;
+  // 서브 콘솔 영역 헤더에 단발성 안내 ⓘ
+  return `<div class="subs-head"><b>${esc(t("subs_title"))}</b><span class="subs-info" title="${esc(t("subs_info"))}">ⓘ</span></div>
+          <div class="subs">${cards}</div>`;
 }
 
 function shortId(id){ const m = String(id).match(/\d+/); return m ? m[0] : String(id).slice(-4); }
@@ -1014,12 +1091,20 @@ listen("agent_removed", (ev) => {
   render();
 });
 listen("teammate_update", (ev) => {
-  const { agentId, name, status, desc, result, isError } = ev.payload || {};
+  const { agentId, name, status, desc, result, isError, prompt, model, startedAt, endedAt } = ev.payload || {};
   const a = state.get(agentId); if (!a) return;
   a.teammates = a.teammates || {};
   const prev = mate(a.teammates, name);
-  a.teammates[name] = { status, desc: desc || prev.desc || "", result: result || prev.result || "",
-                        isError: !!isError || !!prev.isError };
+  a.teammates[name] = {
+    status,
+    desc: desc || prev.desc || "",
+    result: result || prev.result || "",
+    isError: !!isError || !!prev.isError,
+    prompt: prompt || prev.prompt || "",
+    model: model || prev.model || "",
+    startedAt: startedAt || prev.startedAt || 0,
+    endedAt: endedAt || prev.endedAt || 0,
+  };
   if (agentId === selectedId) renderStage(); else renderSidebar();
 });
 listen("cost_capped", (ev) => {

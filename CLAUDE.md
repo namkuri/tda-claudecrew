@@ -125,6 +125,10 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - `spawn_claude_once` 헬퍼로 한 claude 호출(spawn → 파싱 → wait)을 추출. `quiet=true` 웜업은 결과를 짧게(`📚 학습 완료: …`) 요약.
   - 비용/토큰은 웜업 + 메인 합산. 웜업 실패 시 메인은 컨텍스트 없이 진행.
   - 새 상태 **`warming`**: 캐릭터 코랄 색 + 말풍선 "📚 프로젝트 학습 중…" + 사이드바·탭 점 코랄 펄스.
+- **UX·투명성 강화(v0.9.5)**:
+  - **반응형**: 사이드바 `cs-sub`/`cs-token`, 컴포저 `controls` 모두 `flex-wrap` + 명시적 `flex:none` 으로 좁은 창에서도 자연 줄바꿈(요소 1개씩 수직 나열 방지).
+  - **도구 라벨링**: `🔧 Read/Bash/Glob/Grep/Task/...` 백엔드 로그를 UI에서 `📖 파일 읽기(Read)`/`💻 명령 실행(Bash)`/`🔍 파일 검색(Glob)`/`🔎 코드 검색(Grep)`/`🧑‍💼 전문가 위임(Task)` 등 친화 라벨 + 한 줄 툴팁으로 보여줌(`TOOL_LABELS` 매핑).
+  - **서브에이전트 메타·원리**: `teammate_update` 가 `model`/`prompt`/`startedAt`/`endedAt` 함께 emit. 미니 콘솔에 ① 모델·시작시각·소요시간 ② **왜**(description) ③ **무엇을**(prompt 펼치기) ④ **결과**(요약) 표시. 헤더 ⓘ에 "단방향 위임 — 자식 LLM 세션이 독립 처리 후 결과만 반환. 사용자가 직접 대화 불가, 별도 CMD/창 없음" 안내.
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.
