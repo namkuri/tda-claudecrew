@@ -633,48 +633,60 @@ fn spawn_claude_once(
     quiet: bool,
 ) -> (bool, Option<i32>) {
     let _ = repo; // 현재 인자 직접 사용 안 함(향후 확장용)
-    // 인자 구성
+    // 인자 구성 — ⚠ prompt는 인자가 아니라 stdin으로 전달한다.
+    // 이유: Rust 1.77+ 보안 패치(CVE-2024-24576)가 .cmd/.bat 파일에 줄바꿈/특수문자
+    // 포함 인자를 거부 → "batch file arguments are invalid" 에러. 또한 큰 프롬프트가
+    // 명령행 길이 한도(Windows 8191/32K)에 걸릴 수 있다. stdin은 이 모두를 우회.
     let mut args: Vec<String> = vec![
-        "-p".into(),
-        prompt.to_string(),
-        "--output-format".into(),
-        "stream-json".into(),
+        "-p".into(),                       // print mode (positional prompt 없으면 stdin 사용)
+        "--input-format".into(), "text".into(), // stdin을 단일 텍스트 prompt로 읽도록 명시
+        "--output-format".into(), "stream-json".into(),
         "--verbose".into(),
-        "--model".into(),
-        model.to_string(),
-        "--permission-mode".into(),
-        permission.to_string(),
+        "--model".into(), model.to_string(),
+        "--permission-mode".into(), permission.to_string(),
     ];
     if let Some(sid) = resume_sid {
         if !sid.is_empty() { args.push("--resume".into()); args.push(sid.into()); }
     }
 
     let mut cmd = claude_command(&args);
-    cmd.current_dir(worktree).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.current_dir(worktree)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     if keepgoing { cmd.env("CLAUDECREW_KEEPGOING", "1"); }
     if use_subscription {
         cmd.env_remove("ANTHROPIC_API_KEY");
         cmd.env_remove("ANTHROPIC_AUTH_TOKEN");
     }
 
-    // 진단 로그(웜업/메인 모두) — 명령행 길이와 옵션 요약
+    // 진단 로그: prompt는 stdin이라 인자에 안 들어감. 길이만 알린다.
     {
-        let summary: Vec<String> = args.iter().map(|a| {
-            if a.len() > 80 { format!("<{}자>", a.chars().count()) } else { a.clone() }
-        }).collect();
         let total: usize = args.iter().map(|a| a.len() + 1).sum();
         let tag = if quiet { "📚 학습" } else { "$" };
-        emit_output(app, id, &format!("{tag} claude {} (인자 {}자)", summary.join(" "), total));
+        emit_output(app, id, &format!(
+            "{tag} claude {} (인자 {}자, prompt {} bytes via stdin)",
+            args.join(" "), total, prompt.len()
+        ));
     }
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
             emit_output(app, id, &format!("[claude 실행 실패] {e}"));
-            emit_output(app, id, "→ 확인: ① `claude --version` ② PATH ③ 인자 길이");
+            emit_output(app, id, "→ 확인: ① `claude --version` ② PATH에 claude.cmd/.exe ③ 재로그인");
             return (false, None);
         }
     };
+
+    // ★ prompt를 stdin으로 흘려보냄(인자 아님) — 이게 핵심
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        if let Err(e) = stdin.write_all(prompt.as_bytes()) {
+            emit_output(app, id, &format!("[알림] stdin 쓰기 실패: {e}"));
+        }
+        // drop으로 EOF 신호 — Rust가 자동으로 닫음
+    }
 
     // pid 저장
     {
