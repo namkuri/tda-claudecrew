@@ -65,6 +65,8 @@ const I18N = {
     orchestrator: "오케스트레이터", agentConsole: "에이전트 콘솔", sub_working: "작업 받는 중…", sub_done: "완료",
     followPh: "추가로 부탁하거나 물어볼 내용… (Enter 보내기 · Shift+Enter 줄바꿈)", followSend: "보내기 ↵",
     noSession: "이 작업은 아직 세션이 시작되지 않아 후속 대화를 보낼 수 없어요.",
+    talkingTo: "대화 상대", role_orchestrator: "오케스트레이터", role_team: "팀장(병렬 위임)",
+    wtPath: "작업 공간(worktree)", wtOpen: "📁 폴더 열기", wtTitle: "Git worktree — 원본 폴더와 격리된 별도 작업 공간",
     tokenSrc: "토큰", tokenSub: "구독 플랜", tokenApi: "API 키", tokenTitle: "어떤 토큰으로 청구할지 — 구독(앱 플랜) 또는 API 키",
     composerHint: "무엇을 원하는지 적기만 하면, 알아서 전문가와 스킬을 골라 처리해요. (아래 템플릿은 선택)",
     quickTpl: "빠른 템플릿 (선택)",
@@ -129,6 +131,8 @@ const I18N = {
     orchestrator: "Orchestrator", agentConsole: "Agent console", sub_working: "Receiving task…", sub_done: "done",
     followPh: "Ask a follow-up or give the next step… (Enter to send · Shift+Enter for newline)", followSend: "Send ↵",
     noSession: "No session yet — this task hasn't produced its first response, so follow-up isn't possible.",
+    talkingTo: "Talking to", role_orchestrator: "Orchestrator", role_team: "Lead (parallel delegate)",
+    wtPath: "Workspace (worktree)", wtOpen: "📁 Open folder", wtTitle: "Git worktree — an isolated working tree separate from your main folder",
     tokenSrc: "Tokens", tokenSub: "Subscription", tokenApi: "API key", tokenTitle: "Which tokens to bill — your subscription (app plan) or an API key",
     composerHint: "Just write what you want — it picks the right experts and skills for you. (Templates below are optional.)",
     quickTpl: "Quick templates (optional)",
@@ -168,8 +172,10 @@ function makeDemoApi(){
     const sample = ["▶ " + (ko ? "오케스트레이터 시작" : "Orchestrator start"), "🔧 Task → debugger", "🔧 Task → implementer",
                     ko ? "전문가 결과를 모아 검토 중…" : "Collecting expert results…", "🔧 Task → code-reviewer", ko ? "완료. 요약 정리!" : "Done. Summarizing!"];
     const id = "demo" + (++n);
+    const role = args.team ? "team" : (args.agent || "orchestrator");
     const a = { id, branch: "demo-" + n, prompt: args.prompt || "demo", model: args.model || "sonnet",
-                permission: args.permission || "acceptEdits", status: "creating", cost: null, output: [] };
+                permission: args.permission || "acceptEdits", worktree: "/demo/내-프로젝트/.agentboard/demo-" + n,
+                role, status: "creating", cost: null, output: [] };
     agents[id] = a;
     emit("agent_update", { ...a });
     setTimeout(() => { a.status = "running"; emit("agent_update", { ...a }); }, 400);
@@ -193,6 +199,7 @@ function makeDemoApi(){
   const invoke = (cmd, args = {}) => {
     switch (cmd){
       case "read_usage":        return Promise.resolve({ available:true, today_tokens:185000, week_tokens:1240000, today_messages:42, week_messages:286, total_messages:1320, total_sessions:18, models:["claude-sonnet-4-6","claude-opus-4-7"] });
+      case "open_path":         console.log("[demo] open_path", args.path); return Promise.resolve();
       case "send_message": {
         const cur = agents[args.id]; if (!cur) return Promise.resolve();
         emit("agent_output", { id: args.id, text: "\n💬 사용자: " + args.prompt });
@@ -610,6 +617,12 @@ function renderSubConsoles(a){
 
 function shortId(id){ const m = String(id).match(/\d+/); return m ? m[0] : String(id).slice(-4); }
 function tabTitle(a){ const s = (a.prompt || a.branch || a.id).trim(); return s.length > 18 ? s.slice(0, 18) + "…" : s; }
+function roleLabel(a){
+  const r = a.role || "orchestrator";
+  if (r === "orchestrator") return t("role_orchestrator");
+  if (r === "team") return t("role_team");
+  return r; // 전문가명(debugger, implementer 등)
+}
 
 // 상태 → Claude 캐릭터 말풍선
 function speech(a){
@@ -682,6 +695,7 @@ function renderSidebar(){
     const row = document.createElement("div");
     row.className = "ws-item" + (a.id === selectedId ? " active" : "");
     row.dataset.id = a.id;
+    row.title = `${roleLabel(a)} · ${a.worktree || ""}`;
     row.innerHTML =
       `<span class="ws-st ${a.status}" title="${t("status_" + a.status) || a.status}"></span>` +
       `<span class="ws-name">${esc((a.prompt || a.branch || a.id).trim() || a.id)}</span>` +
@@ -728,7 +742,11 @@ function renderAgentView(a){
   av.innerHTML =
     `<div class="char-strip">
        <div class="cc-char ${a.status}"><div class="cc-body"></div></div>
-       <div class="speech">${esc(sp.msg)}${sp.sub ? `<span class="sub">${esc(sp.sub)}</span>` : ""}</div>
+       <div class="speech">
+         <span class="role-tag">${t("talkingTo")}: <b>${esc(roleLabel(a))}</b></span>
+         <div class="msg">${esc(sp.msg)}</div>
+         ${sp.sub ? `<span class="sub">${esc(sp.sub)}</span>` : ""}
+       </div>
        <div class="av-meta">
          <span class="av-model">${esc(a.branch || a.id)}</span>
          ${a.model ? `<span>· ${esc(a.model)}</span>` : ""}
@@ -784,6 +802,11 @@ function renderGit(){
     : `<div class="gp-empty" style="padding:4px 6px">${t("gpNoChange")}</div>`;
   gp.innerHTML =
     `<div class="gp-head">${t("gpBase")}: <b>main</b> · #${shortId(a.id)}</div>
+     <div class="gp-sec">
+       <h4 title="${esc(t("wtTitle"))}">${t("wtPath")}</h4>
+       <div class="gp-wt"><code class="gp-wtpath" title="${esc(a.worktree || "")}">${esc(a.worktree || "")}</code>
+         <button class="linkbtn" id="gpOpenWt" ${a.worktree ? "" : "disabled"}>${t("wtOpen")}</button></div>
+     </div>
      <div class="gp-commit">
        <textarea id="gpMsg" placeholder="${esc(t("gpCommitPh"))}"></textarea>
        <button class="btn go" id="gpCommitBtn">✓ ${t("gpCommit")}</button>
@@ -792,6 +815,7 @@ function renderGit(){
        <h4>${t("gpAgainst")}<span class="n">${st ? st.files.length : 0}</span></h4>
        ${filesHtml}
      </div>`;
+  const wtBtn = $("#gpOpenWt"); if (wtBtn) wtBtn.onclick = () => { if (a.worktree) invoke("open_path", { path: a.worktree }).catch(e => alert(t("opFail") + e)); };
   $("#gpCommitBtn").onclick = async () => {
     const msg = $("#gpMsg").value;
     try { const res = await invoke("commit_agent", { id: a.id, message: msg || "" }); showHint(typeof res === "string" ? res : t("status_committed")); a._stat = null; loadAgents(); }

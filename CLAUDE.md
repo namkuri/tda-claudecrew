@@ -100,6 +100,11 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **세션 재개**: stream-json system 이벤트의 `session_id`를 `AgentInfo`에 저장. `send_message(id, prompt)` 커맨드가 같은 worktree에서 `claude -p -r <session_id>`로 후속 메시지 실행 → 한 작업 탭에서 **대화로 이어 말할 수 있음**.
   - UI: 에이전트 뷰 하단에 후속 입력창(Enter 보내기, Shift+Enter 줄바꿈). 사용자 메시지는 메인 콘솔에 `💬 사용자: …`로 기록.
   - **자동 오케스트레이션 강화**: 프롬프트에 "독립적인 조각은 한 어시스턴트 턴에 Task들을 묶어 동시에 호출해 병렬 진행"을 명시.
+- **데스크톱 사용성/투명성(v0.8.4)**:
+  - **CMD 창 깜빡임 제거**: Windows에서 자식 프로세스(`cmd /C claude`, `git`, `taskkill`)에 `CREATE_NO_WINDOW`(0x08000000) 플래그 적용 → 콘솔 창 더는 안 뜸. `hide_window()` 헬퍼로 일괄.
+  - **대화 상대 라벨**: `AgentInfo.role` 추가(`orchestrator`/`team`/전문가명). 에이전트 뷰 말풍선 위에 "대화 상대: 오케스트레이터/팀장(병렬 위임)/<전문가>" 칩 표시.
+  - **작업 상태 디스크 영속화**: `.agentboard/<branch>/.cc-state.json`에 prompt/status/session_id/role/output/cost/tokens 저장(매 줄 출력의 5건마다, set_status·agent_done에서). `restore_agents`가 이 파일을 읽어 **터미널 로그·세션ID·역할까지 진짜 복원**.
+  - **worktree 가시화**: 사이드바 행 툴팁 = `역할 · worktree 경로`. Git 패널에 worktree 경로 + 📁 폴더 열기 버튼(`open_path` 커맨드).
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.

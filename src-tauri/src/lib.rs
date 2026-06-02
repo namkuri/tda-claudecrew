@@ -8,28 +8,30 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
 // ---------------- 상태 ----------------
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize, Default)]
 struct AgentInfo {
     id: String,
     repo: String,
     branch: String,
     prompt: String,
-    model: String,
-    permission: String,
+    #[serde(default)] model: String,
+    #[serde(default)] permission: String,
     worktree: String,
     status: String,        // creating | running | done | error | stopped | committed
-    cost: Option<f64>,
-    pid: Option<u32>,
-    port: Option<u16>,     // 감지된 dev 서버 포트(미리보기)
-    tokens_in: Option<u64>,  // 누적 입력 토큰
-    tokens_out: Option<u64>, // 누적 출력 토큰
-    ctx: Option<u64>,        // 마지막 턴의 컨텍스트 크기(입력+캐시읽기)
-    session_id: Option<String>, // Claude Code 세션 ID (후속 대화에 사용)
+    #[serde(default)] cost: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pid: Option<u32>, // 런타임 전용
+    #[serde(default)] port: Option<u16>,     // 감지된 dev 서버 포트(미리보기)
+    #[serde(default)] tokens_in: Option<u64>,
+    #[serde(default)] tokens_out: Option<u64>,
+    #[serde(default)] ctx: Option<u64>,
+    #[serde(default)] session_id: Option<String>,
+    #[serde(default)] role: Option<String>,
+    #[serde(default)] output: Vec<String>,   // 누적 터미널 로그(디스크 영속화)
 }
 
 struct AppState {
@@ -67,29 +69,37 @@ fn home_dir() -> PathBuf {
     }
 }
 
+// Windows에서 자식 프로세스의 콘솔 창 깜빡임을 막는다(CREATE_NO_WINDOW).
+// Tauri로 띄운 앱은 콘솔이 없어서 cmd/claude/git을 spawn할 때마다 새 창이 깜빡인다.
+#[cfg(windows)]
+fn hide_window(cmd: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+}
+#[cfg(not(windows))]
+fn hide_window(_cmd: &mut Command) {}
+
 // Windows에서는 .cmd 실행을 위해 cmd /C 래퍼가 필요하다.
 fn claude_command(args: &[String]) -> Command {
-    if cfg!(windows) {
+    let mut c = if cfg!(windows) {
         let mut c = Command::new("cmd");
         c.arg("/C").arg("claude");
-        for a in args {
-            c.arg(a);
-        }
+        for a in args { c.arg(a); }
         c
     } else {
         let mut c = Command::new("claude");
-        for a in args {
-            c.arg(a);
-        }
+        for a in args { c.arg(a); }
         c
-    }
+    };
+    hide_window(&mut c);
+    c
 }
 
 fn git(repo: &str, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(repo).args(args);
+    hide_window(&mut cmd);
+    let out = cmd
         .output()
         .map_err(|e| format!("git 실행 실패: {e}"))?;
     if out.status.success() {
@@ -398,6 +408,14 @@ fn create_agent(
         .to_string_lossy()
         .to_string();
 
+    // 팀 모드 > 단일 전문가 위임 > 자동 오케스트레이션(기본) — 라벨/프롬프트 결정
+    let team_on = team.unwrap_or(false);
+    let keepgoing = keepgoing.unwrap_or(false);
+    let use_subscription = authmode.as_deref() != Some("api"); // 기본: 구독(앱 플랜) 사용
+    let role = if team_on { "team".to_string() }
+        else if let Some(name) = agent.as_deref().filter(|n| !n.is_empty()) { name.to_string() }
+        else { "orchestrator".to_string() };
+
     let info = AgentInfo {
         id: id.clone(),
         repo: repo.clone(),
@@ -414,16 +432,13 @@ fn create_agent(
         tokens_out: None,
         ctx: None,
         session_id: None,
+        role: Some(role.clone()),
+        output: vec![],
     };
     state.agents.lock().unwrap().insert(id.clone(), info.clone());
     let _ = app.emit("agent_update", info);
-
-    // 팀 모드 > 단일 전문가 위임 > 자동 오케스트레이션(기본) (표시용 prompt는 원문 유지)
-    let team = team.unwrap_or(false);
-    let keepgoing = keepgoing.unwrap_or(false);
-    let use_subscription = authmode.as_deref() != Some("api"); // 기본: 구독(앱 플랜) 사용
     // 사용자 요청을 '맨 앞'에 두어 절대 묻히지 않게 하고, 오케스트레이션 안내는 짧게 뒤에 붙인다.
-    let effective_prompt = if team {
+    let effective_prompt = if team_on {
         format!(
             "{prompt}\n\n\
 — 위 요청을 작은 단위로 쪼개 적합한 전문가(서브에이전트: oracle 설계·근본원인, librarian 검색, \
@@ -462,10 +477,21 @@ fn set_status(app: &AppHandle, id: &str, status: &str) {
     if let Some(a) = map.get_mut(id) {
         a.status = status.into();
         let _ = app.emit("agent_update", a.clone());
+        save_agent_state(a);
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+// 작업 상태를 .agentboard/<branch>/.cc-state.json 에 저장한다 (재시작 후 복원용).
+// best-effort: 실패해도 동작에 영향 없음.
+fn save_agent_state(a: &AgentInfo) {
+    if a.worktree.is_empty() { return; }
+    let path = PathBuf::from(&a.worktree).join(".cc-state.json");
+    if let Ok(json) = serde_json::to_string_pretty(a) {
+        let _ = std::fs::create_dir_all(&a.worktree);
+        let _ = std::fs::write(&path, json);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_agent(
     app: AppHandle,
@@ -629,6 +655,7 @@ fn run_agent(
     let agents = state.agents.lock().unwrap();
     if let Some(a) = agents.get(&id) {
         let _ = app.emit("agent_done", a.clone());
+        save_agent_state(a); // 마지막 상태(비용/토큰/세션ID/output)까지 영속화
     }
 }
 
@@ -716,6 +743,18 @@ fn process_teammates(app: &AppHandle, agent_id: &str, evt: &Value, map: &mut Has
 
 fn emit_output(app: &AppHandle, id: &str, text: &str) {
     note_port(app, id, text);
+    // 메모리 + 디스크에 누적(복원용). 매우 큰 작업은 잘림 방지 위해 5000줄/줄당 4KB 상한.
+    {
+        let state = app.state::<AppState>();
+        let mut agents = state.agents.lock().unwrap();
+        if let Some(a) = agents.get_mut(id) {
+            let line: String = text.chars().take(4000).collect();
+            a.output.push(line);
+            if a.output.len() > 5000 { let drop = a.output.len() - 5000; a.output.drain(..drop); }
+            // 디스크 저장은 5줄마다(쓰기 비용 감소)
+            if a.output.len() % 5 == 0 { save_agent_state(a); }
+        }
+    }
     let _ = app.emit(
         "agent_output",
         serde_json::json!({ "id": id, "text": text }),
@@ -924,6 +963,15 @@ fn open_url(app: AppHandle, url: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+// 폴더(또는 파일) 경로를 OS 파일 탐색기로 연다.
+#[tauri::command]
+fn open_path(app: AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_path(path, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 // ---------------- 커맨드: 목록 ----------------
 #[tauri::command]
 fn list_agents(app: AppHandle) -> Vec<AgentInfo> {
@@ -962,23 +1010,37 @@ fn restore_agents(app: AppHandle, repo: String) -> Vec<AgentInfo> {
                     *c += 1;
                     format!("r{}", *c)
                 };
-                let info = AgentInfo {
-                    id: id.clone(),
-                    repo: repo.clone(),
-                    branch,
-                    prompt: "(이전 작업 — 복원됨)".into(),
-                    model: String::new(),
-                    permission: String::new(),
-                    worktree: wt,
-                    status: "done".into(),
-                    cost: None,
-                    pid: None,
-                    port: None,
-                    tokens_in: None,
-                    tokens_out: None,
-                    ctx: None,
-                    session_id: None,
-                };
+                // 디스크 영속화 파일이 있으면 그걸로 진짜 복원, 없으면 메타만으로
+                let state_path = PathBuf::from(&wt).join(".cc-state.json");
+                let info = std::fs::read_to_string(&state_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str::<AgentInfo>(&s).ok())
+                    .map(|mut a| {
+                        // 재시작 후엔 실행 중일 수 없으니 상태/pid 정리
+                        a.id = id.clone();
+                        a.pid = None;
+                        if a.status == "running" || a.status == "creating" { a.status = "stopped".into(); }
+                        a
+                    })
+                    .unwrap_or_else(|| AgentInfo {
+                        id: id.clone(),
+                        repo: repo.clone(),
+                        branch: branch.clone(),
+                        prompt: "(이전 작업 — 복원됨)".into(),
+                        model: String::new(),
+                        permission: String::new(),
+                        worktree: wt.clone(),
+                        status: "done".into(),
+                        cost: None,
+                        pid: None,
+                        port: None,
+                        tokens_in: None,
+                        tokens_out: None,
+                        ctx: None,
+                        session_id: None,
+                        role: None,
+                        output: vec![],
+                    });
                 state.agents.lock().unwrap().insert(id, info);
             }
         }
@@ -1006,7 +1068,10 @@ fn get_diff(app: AppHandle, id: String) -> Result<String, String> {
 // ---------------- 커맨드: 중지 ----------------
 fn kill_pid(pid: u32) {
     if cfg!(windows) {
-        let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).output();
+        let mut c = Command::new("taskkill");
+        c.args(["/PID", &pid.to_string(), "/T", "/F"]);
+        hide_window(&mut c);
+        let _ = c.output();
     } else {
         let _ = Command::new("kill").arg(pid.to_string()).output();
     }
@@ -1280,7 +1345,8 @@ pub fn run() {
             restore_agents,
             check_api_mode,
             read_usage,
-            send_message
+            send_message,
+            open_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
