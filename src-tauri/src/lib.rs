@@ -191,7 +191,7 @@ fn setup_environment() -> Result<String, String> {
 
     // 스킬 설치 (~/.claude/skills/<name>/SKILL.md)
     let skills_dir = claude_dir.join("skills");
-    let skills: [(&str, &str); 10] = [
+    let skills: [(&str, &str); 12] = [
         ("git-master", include_str!("../skills/git-master/SKILL.md")),
         ("test-writer", include_str!("../skills/test-writer/SKILL.md")),
         ("frontend-ui", include_str!("../skills/frontend-ui/SKILL.md")),
@@ -202,6 +202,8 @@ fn setup_environment() -> Result<String, String> {
         ("security-research", include_str!("../skills/security-research/SKILL.md")),
         ("remove-deadcode", include_str!("../skills/remove-deadcode/SKILL.md")),
         ("pre-publish-review", include_str!("../skills/pre-publish-review/SKILL.md")),
+        ("github-triage", include_str!("../skills/github-triage/SKILL.md")),
+        ("work-with-pr", include_str!("../skills/work-with-pr/SKILL.md")),
     ];
     for (name, body) in skills {
         let dir = skills_dir.join(name);
@@ -209,26 +211,34 @@ fn setup_environment() -> Result<String, String> {
         std::fs::write(dir.join("SKILL.md"), body).map_err(|e| e.to_string())?;
     }
 
-    // 멀티파일 스킬: security-research 보조 스크립트(scripts/)
-    let sr_scripts = skills_dir.join("security-research").join("scripts");
-    std::fs::create_dir_all(&sr_scripts).map_err(|e| e.to_string())?;
-    std::fs::write(
-        sr_scripts.join("scan-secrets.sh"),
-        include_str!("../skills/security-research/scripts/scan-secrets.sh"),
-    )
-    .map_err(|e| e.to_string())?;
-    {
+    // 멀티파일 스킬: 보조 스크립트(scripts/) — (스킬, 스크립트명, sh, ps1)
+    let skill_scripts: [(&str, &str, &str, &str); 2] = [
+        (
+            "security-research",
+            "scan-secrets",
+            include_str!("../skills/security-research/scripts/scan-secrets.sh"),
+            include_str!("../skills/security-research/scripts/scan-secrets.ps1"),
+        ),
+        (
+            "github-triage",
+            "gh-list",
+            include_str!("../skills/github-triage/scripts/gh-list.sh"),
+            include_str!("../skills/github-triage/scripts/gh-list.ps1"),
+        ),
+    ];
+    for (skill, name, sh, ps1) in skill_scripts {
+        let dir = skills_dir.join(skill).join("scripts");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let sh_path = dir.join(format!("{name}.sh"));
+        std::fs::write(&sh_path, sh).map_err(|e| e.to_string())?;
         let mut bytes = vec![0xEF, 0xBB, 0xBF]; // .ps1 BOM
-        bytes.extend_from_slice(include_str!("../skills/security-research/scripts/scan-secrets.ps1").as_bytes());
-        std::fs::write(sr_scripts.join("scan-secrets.ps1"), bytes).map_err(|e| e.to_string())?;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(
-            sr_scripts.join("scan-secrets.sh"),
-            std::fs::Permissions::from_mode(0o755),
-        );
+        bytes.extend_from_slice(ps1.as_bytes());
+        std::fs::write(dir.join(format!("{name}.ps1")), bytes).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&sh_path, std::fs::Permissions::from_mode(0o755));
+        }
     }
 
     // 슬래시 커맨드 설치 (~/.claude/commands/<name>.md)
@@ -244,7 +254,7 @@ fn setup_environment() -> Result<String, String> {
         std::fs::write(commands_dir.join(name), body).map_err(|e| e.to_string())?;
     }
 
-    Ok("준비 완료: 전문가 7종 + 스킬 10종 + 커맨드 4종 설치 + 팀 기능 + 안전/품질 훅".into())
+    Ok("준비 완료: 전문가 7종 + 스킬 12종 + 커맨드 4종 설치 + 팀 기능 + 안전/품질 훅".into())
 }
 
 // ~/.claude/claudecrew-hooks 에 OS별 훅 스크립트(두 벌)를 기록하고,

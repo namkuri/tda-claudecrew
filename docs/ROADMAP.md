@@ -122,9 +122,9 @@
 ### [x] V1.3 작업 공간 영속화/복원  ✅ 완료
 - `restore_agents(repo)`가 `git worktree list --porcelain`로 `.agentboard/` 작업을 보드에 복원(시작 시 호출).
 
-### [ ] V1.4 안전 가드 전체 + 권한 UI
-- **목표**: "안전 수준"(이 폴더만/읽기만/전체)을 UI에서 선택, 위험 작업 확인 다이얼로그.
-- **완료 기준**: 권한 프리셋이 `permission-mode`/훅에 반영.
+### [x] V1.4 안전 가드 전체 + 권한 UI  ✅ 완료
+- 컴포저에 "안전 수준" 선택(이 폴더만 acceptEdits / 읽기만 plan / 전체 bypassPermissions+위험확인).
+  실행 시 permission을 안전수준으로 결정(읽기전용 레시피는 plan 유지). 선택 localStorage 기억. 데모 검증.
 
 ### [ ] V1.5 단일 설치형 배포
 - **목표**: .exe/.app 인스톨러.
@@ -134,7 +134,9 @@
 ---
 
 ## 마일스톤 v2 — "고도화"
-### [ ] V2.1 레시피 마켓/공유  ### [~] V2.2 LSP·정밀편집(MCP) — 검색 MCP(context7/Exa) 기초 완료, LSP 남음  ### [ ] V2.3 API 자동 전환(헤비 시)
+### [x] V2.1 레시피 마켓/공유 — 커스텀 레시피 localStorage + 내보내기/가져오기(JSON). 데모 검증.
+### [~] V2.2 LSP·정밀편집(MCP) — 검색 MCP(context7/Exa) 완료, LSP 남음
+### [~] V2.3 API 자동 전환 — 동시 3개+ 시 'API 권장' 힌트 완료. 실제 API 경로 자동 전환은 남음.
 ### [ ] V2.4 다국어  ### [ ] V2.5 플러그인 번들 배포(.claude-plugin)
 
 ---

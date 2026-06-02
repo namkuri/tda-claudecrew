@@ -67,6 +67,11 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - 워크플로 스킬: **security-research**(+scripts/scan-secrets {sh,ps1} 멀티파일), **remove-deadcode**, **pre-publish-review**(다중 관점 게이트).
   - 커맨드: `/hyperplan /security-research /remove-deadcode /review` → `~/.claude/commands/`.
   - UI 레시피 **8종**(+🧠 계획 세우기[hyperplan], +🛡️ 보안 점검).
+- **고도화(v0.5)**:
+  - **안전 수준 프리셋(V1.4)**: 이 폴더만(acceptEdits)/읽기만(plan)/전체 허용(bypassPermissions, 위험확인). 읽기전용 레시피는 권한을 올리지 않음.
+  - 스킬 **12종**: +github-triage(+scripts/gh-list), +work-with-pr.
+  - **레시피 마켓/공유(V2.1)**: 커스텀 레시피 localStorage + 내보내기/가져오기(JSON 묶음). 가져온 레시피는 점선 버튼으로 렌더.
+  - **API 전환 힌트(V2.3)**: 동시 실행 3개 이상이면 "API 권장" 배지.
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.

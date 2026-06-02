@@ -132,6 +132,17 @@ $("#costCap").addEventListener("change", () => {
   $("#costBanner").classList.add("hidden");
 });
 
+// 안전 수준 — "전체 허용"은 위험 확인 후에만. 선택은 기억해 둔다.
+(() => { const s = localStorage.getItem("cc_safety"); if (s) $("#safety").value = s; })();
+$("#safety").addEventListener("change", (e) => {
+  if (e.target.value === "bypassPermissions") {
+    if (!confirm("‘전체 허용’은 위험할 수 있어요. AI가 이 폴더 밖이나 시스템 변경도 시도할 수 있습니다. 정말 켤까요?")) {
+      e.target.value = "acceptEdits";
+    }
+  }
+  localStorage.setItem("cc_safety", e.target.value);
+});
+
 // "검색 켜기" 토글 → 프로젝트 .mcp.json 에 공식 문서 검색(context7) 연결/해제
 $("#tglSearch").addEventListener("change", async (e) => {
   if (!repoPath) { e.target.checked = false; alert("먼저 폴더를 선택하세요."); return; }
@@ -163,22 +174,88 @@ $("#btnChangeFolder").addEventListener("click", async () => {
   if (picked) { repoPath = picked; localStorage.setItem("cc_repo", repoPath); $("#folderLabel").textContent = repoPath; }
 });
 
-document.querySelectorAll(".recipe").forEach(b => b.addEventListener("click", () => {
-  const r = RECIPES[b.dataset.r];
-  $("#speed").value = r.speed;
+// ---------- 레시피 (내장 + 사용자 커스텀 = 마켓/공유) ----------
+let customRecipes = {};
+try { customRecipes = JSON.parse(localStorage.getItem("cc_recipes") || "{}") || {}; } catch (_) { customRecipes = {}; }
+const allRecipes = () => ({ ...RECIPES, ...customRecipes });
+
+function applyRecipe(key){
+  const r = allRecipes()[key];
+  if (!r) return;
+  if (r.speed) $("#speed").value = r.speed;
   const cur = $("#prompt").value.trim();
-  if (!cur || Object.values(RECIPES).some(x => cur.startsWith(x.text.trim()))) $("#prompt").value = r.text;
-  $("#prompt").dataset.perm = r.perm;
+  if (!cur || Object.values(allRecipes()).some(x => x.text && cur.startsWith(x.text.trim()))) $("#prompt").value = r.text || "";
+  if (r.perm) $("#prompt").dataset.perm = r.perm; else delete $("#prompt").dataset.perm;
   if (r.agent) $("#prompt").dataset.agent = r.agent; else delete $("#prompt").dataset.agent;
   $("#prompt").focus();
-}));
+}
+
+// 커스텀 레시피를 버튼으로 렌더(내장 뒤에 붙임)
+function renderCustomRecipes(){
+  const box = document.querySelector(".recipes");
+  box.querySelectorAll(".recipe.custom").forEach(b => b.remove());
+  Object.entries(customRecipes).forEach(([key, r]) => {
+    if (RECIPES[key]) return; // 내장과 겹치면 건너뜀
+    const b = document.createElement("button");
+    b.className = "recipe custom";
+    b.dataset.r = key;
+    b.textContent = (r.emoji ? r.emoji + " " : "🧩 ") + (r.label || key);
+    box.appendChild(b);
+  });
+}
+
+// 이벤트 위임 — 동적으로 추가된 커스텀 레시피도 동작
+document.querySelector(".recipes").addEventListener("click", (e) => {
+  const b = e.target.closest(".recipe");
+  if (b && b.dataset.r) applyRecipe(b.dataset.r);
+});
+
+// 내보내기: 현재 레시피 묶음을 JSON 파일로 저장(공유용)
+$("#recipeExport").addEventListener("click", () => {
+  const pack = { version: 1, recipes: allRecipes() };
+  const json = JSON.stringify(pack, null, 2);
+  try {
+    const blob = new Blob([json], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "claudecrew-recipes.json";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  } catch (_) {
+    prompt("아래 JSON을 복사해 공유하세요:", json);
+  }
+});
+
+// 가져오기: JSON 묶음을 붙여넣어 새 레시피를 추가(내장은 덮어쓰지 않음)
+$("#recipeImport").addEventListener("click", () => {
+  const raw = prompt("레시피 묶음(JSON)을 붙여넣으세요:");
+  if (!raw) return;
+  let pack;
+  try { pack = JSON.parse(raw); } catch (_) { alert("JSON 형식이 올바르지 않아요."); return; }
+  const incoming = pack && pack.recipes ? pack.recipes : pack;
+  if (!incoming || typeof incoming !== "object") { alert("레시피를 찾을 수 없어요."); return; }
+  let added = 0;
+  Object.entries(incoming).forEach(([key, r]) => {
+    if (RECIPES[key]) return;        // 내장은 보호
+    if (!r || !r.text) return;       // 최소 형식 검증
+    customRecipes[key] = { label: r.label || key, emoji: r.emoji || "", speed: r.speed || "sonnet",
+                           perm: r.perm || "acceptEdits", agent: r.agent || null, text: r.text };
+    added++;
+  });
+  localStorage.setItem("cc_recipes", JSON.stringify(customRecipes));
+  renderCustomRecipes();
+  alert(added > 0 ? `레시피 ${added}개를 추가했어요.` : "추가할 새 레시피가 없어요(내장과 겹치거나 형식 누락).");
+});
 
 $("#btnRun").addEventListener("click", async () => {
   const prompt = $("#prompt").value.trim();
   if (!repoPath) { alert("먼저 폴더를 선택하세요."); return; }
   if (!prompt) { alert("무엇을 부탁할지 적어주세요."); return; }
   const model = $("#speed").value;
-  const permission = $("#prompt").dataset.perm || "acceptEdits";
+  // 안전 수준이 권한을 결정한다. 단, 읽기 전용 레시피(plan)는 절대 권한을 올리지 않는다.
+  const recipePerm = $("#prompt").dataset.perm;
+  const safety = $("#safety").value;
+  const permission = recipePerm === "plan" ? "plan" : safety;
   const agent = $("#prompt").dataset.agent || null;
   const keepgoing = $("#tglKeep").checked;
   const team = $("#tglTeam").checked;
@@ -217,6 +294,9 @@ function render(){
   $("#costTotal").textContent = "$" + total.toFixed(2);
   const cap = parseFloat($("#costCap")?.value);
   $("#costTotal").classList.toggle("warn", !isNaN(cap) && cap > 0 && total >= cap * 0.8);
+  // 동시에 여러 작업이 돌면 구독 한도를 빨리 쓰므로 API 권장(기획 9장)
+  const running = [...state.values()].filter(a => a.status === "running" || a.status === "creating").length;
+  $("#apiHint")?.classList.toggle("hidden", running < 3);
   if (state.size === 0){ board.innerHTML = '<div class="empty" id="emptyMsg">아직 맡긴 일이 없어요. 위에서 레시피를 고르거나 부탁을 적고 ▶ 를 눌러보세요.</div>'; return; }
   board.innerHTML = "";
   [...state.values()].forEach(a => {
@@ -356,6 +436,7 @@ listen("cost_capped", (ev) => {
 });
 
 // ---------- 시작 ----------
+renderCustomRecipes();
 if (DEMO) {
   const d = document.createElement("div");
   d.className = "demo-badge";
