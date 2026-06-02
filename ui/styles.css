@@ -121,7 +121,12 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .form-acts .btn{flex:none} #rfDelete{color:var(--err);border-color:var(--err)}
 
 /* ============ Superset식 3-컬럼 워크스테이션 ============ */
-#app{height:100vh;display:grid;grid-template-columns:266px 1fr 340px;overflow:hidden}
+#app{height:100vh;display:grid;grid-template-columns:266px 1fr 340px;grid-template-rows:minmax(0,1fr) auto auto;overflow:hidden}
+.sidebar{grid-row:1;grid-column:1}
+.center{grid-row:1;grid-column:2}
+.gitpanel{grid-row:1;grid-column:3}
+#costBanner{grid-row:2;grid-column:1/-1}
+.statusbar{grid-row:3;grid-column:1/-1}
 
 /* 좌: 워크스페이스 사이드바 */
 .sidebar{display:flex;flex-direction:column;border-right:1px solid var(--line);background:var(--panel);min-height:0}
@@ -267,3 +272,15 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .console.sub .con-body{flex:1;color:#aebac4;font-size:12px;min-height:64px}
 .console.sub.working{border-color:var(--run)}
 .console.sub.done{border-color:var(--accent-d)}
+
+/* 최하단 상태바 */
+.statusbar{display:flex;align-items:center;gap:14px;padding:7px 16px;border-top:1px solid var(--line);background:var(--panel);font-family:var(--mono);font-size:11.5px;color:var(--dim);white-space:nowrap;overflow-x:auto}
+.statusbar .sb-seg{display:inline-flex;align-items:center;gap:6px}
+.statusbar .sb-sep{color:var(--faint)}
+.statusbar b{color:var(--ink);font-weight:600}
+.statusbar .up{color:var(--idle)} .statusbar .down{color:var(--accent)}
+.statusbar .sb-ctx{margin-left:auto}
+.statusbar .ctxbar{display:inline-block;width:120px;height:7px;border-radius:4px;background:var(--panel2);border:1px solid var(--line);overflow:hidden;vertical-align:middle}
+.statusbar .ctxbar i{display:block;height:100%;background:var(--accent)}
+.statusbar .ctxbar i.warn{background:var(--run)} .statusbar .ctxbar i.full{background:var(--err)}
+.statusbar .sb-note{color:var(--faint);cursor:help}

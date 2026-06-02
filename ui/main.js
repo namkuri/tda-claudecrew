@@ -66,6 +66,8 @@ const I18N = {
     tokenSrc: "토큰", tokenSub: "구독 플랜", tokenApi: "API 키", tokenTitle: "어떤 토큰으로 청구할지 — 구독(앱 플랜) 또는 API 키",
     composerHint: "무엇을 원하는지 적기만 하면, 알아서 전문가와 스킬을 골라 처리해요. (아래 템플릿은 선택)",
     quickTpl: "빠른 템플릿 (선택)",
+    sbSession: "세션", sbWeek: "주간 누적", sbCtx: "현재 작업 컨텍스트", sbUsedSub: "구독 사용량", sbUsedApi: "API 사용량",
+    sbNote: "ⓘ", sbNoteTitle: "Claude Code는 구독 잔여 한도를 외부로 알려주지 않아, '사용한' 토큰을 표시합니다. 주간 누적은 이 앱이 완료된 작업 기준으로 합산합니다.",
   },
   en: {
     lead: "The easiest way to hand work to a team of AI experts.<br/>Just 3 steps to get started!",
@@ -125,6 +127,8 @@ const I18N = {
     tokenSrc: "Tokens", tokenSub: "Subscription", tokenApi: "API key", tokenTitle: "Which tokens to bill — your subscription (app plan) or an API key",
     composerHint: "Just write what you want — it picks the right experts and skills for you. (Templates below are optional.)",
     quickTpl: "Quick templates (optional)",
+    sbSession: "Session", sbWeek: "This week", sbCtx: "Current task context", sbUsedSub: "Subscription usage", sbUsedApi: "API usage",
+    sbNote: "ⓘ", sbNoteTitle: "Claude Code doesn't expose remaining subscription quota, so this shows tokens USED. Weekly total is summed by this app over finished tasks.",
   },
 };
 let lang = localStorage.getItem("cc_lang") || "ko";
@@ -176,8 +180,8 @@ function makeDemoApi(){
       setTimeout(() => emit("teammate_update", { agentId: id, name: nm, desc, status: "working" }), 900 + i * 600);
       setTimeout(() => emit("teammate_update", { agentId: id, name: nm, result, status: "done" }), 2600 + i * 600);
     });
-    setTimeout(() => { a.port = 5173; emit("agent_update", { ...a }); }, 2200);
-    setTimeout(() => { a.status = "done"; a.cost = 0.0123; emit("agent_done", { ...a }); }, 800 + sample.length * 600 + 400);
+    setTimeout(() => { a.port = 5173; a.ctx = 18500; a.tokens_in = 18500; a.tokens_out = 2400; emit("agent_update", { ...a }); }, 2200);
+    setTimeout(() => { a.status = "done"; a.cost = 0.0123; a.ctx = 42800; a.tokens_in = 42800; a.tokens_out = 9100; emit("agent_done", { ...a }); }, 800 + sample.length * 600 + 400);
     return Promise.resolve(id);
   }
   const invoke = (cmd, args = {}) => {
@@ -306,7 +310,7 @@ function syncTokenSeg(){
 $("#tokenSeg").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-mode]"); if (!b) return;
   authMode = b.dataset.mode; localStorage.setItem("cc_authmode", authMode);
-  syncTokenSeg(); renderStatusStrip();
+  syncTokenSeg(); renderStatusStrip(); renderStatusbar();
 });
 
 $("#costCap").addEventListener("change", () => {
@@ -514,6 +518,31 @@ function costTotal(){
   return s;
 }
 
+// ---------- 토큰/컨텍스트 상태바 ----------
+const CTX_WINDOW = 200000; // 컨텍스트 창(토큰) 가정
+function fmtTok(n){ n = n || 0; if (n >= 1e6) return (n/1e6).toFixed(1)+"M"; if (n >= 1e3) return (n/1e3).toFixed(1)+"k"; return String(n); }
+function weekKey(){ const d = new Date(); const jan1 = new Date(d.getFullYear(),0,1); const wk = Math.ceil((((d - jan1)/86400000) + jan1.getDay() + 1)/7); return d.getFullYear()+"-W"+wk; }
+let weekData; try { weekData = JSON.parse(localStorage.getItem("cc_week")||"{}"); } catch(_){ weekData = {}; }
+if (weekData.key !== weekKey()) weekData = { key: weekKey(), tokens: 0, ids: [] };
+function addWeekly(id, tok){ if (!tok || weekData.ids.includes(id)) return; weekData.ids.push(id); weekData.tokens += tok; localStorage.setItem("cc_week", JSON.stringify(weekData)); }
+
+function renderStatusbar(){
+  const bar = $("#statusbar"); if (!bar) return;
+  let tin = 0, tout = 0; state.forEach(a => { tin += a.tokens_in || 0; tout += a.tokens_out || 0; });
+  const usedLabel = authMode === "api" ? t("sbUsedApi") : t("sbUsedSub");
+  const sel = (selectedId && state.has(selectedId)) ? state.get(selectedId) : null;
+  const ctx = sel && sel.ctx ? sel.ctx : 0;
+  const pct = Math.min(100, Math.round(ctx / CTX_WINDOW * 100));
+  const ctxCls = pct >= 90 ? "full" : (pct >= 70 ? "warn" : "");
+  bar.innerHTML =
+    `<span class="sb-seg" title="${esc(t("sbNoteTitle"))}">${usedLabel} ${t("sbNote")}</span>
+     <span class="sb-sep">·</span>
+     <span class="sb-seg">${t("sbSession")}: <span class="up">↑${fmtTok(tin)}</span> <span class="down">↓${fmtTok(tout)}</span> <b>${fmtTok(tin + tout)}</b></span>
+     <span class="sb-sep">·</span>
+     <span class="sb-seg">${t("sbWeek")}: <b>${fmtTok(weekData.tokens)}</b></span>
+     <span class="sb-seg sb-ctx">${t("sbCtx")}: <b>${fmtTok(ctx)}</b> / ${fmtTok(CTX_WINDOW)} (${pct}%) <span class="ctxbar"><i class="${ctxCls}" style="width:${pct}%"></i></span></span>`;
+}
+
 // 팀원 데이터 정규화: {status} 문자열 또는 {status,desc,result} 객체 모두 허용
 function mate(tm, name){ const v = tm[name]; return typeof v === "string" ? { status: v } : (v || {}); }
 
@@ -594,6 +623,7 @@ function render(){
   renderTabs();
   renderStage();
   renderGit();
+  renderStatusbar();
 }
 
 function renderStatusStrip(){
@@ -814,7 +844,13 @@ listen("agent_output", (ev) => {
   if (term && !wasEmpty) { term.insertAdjacentHTML("beforeend", "\n" + markTool(text)); term.scrollTop = term.scrollHeight; }
   else renderStage();                            // 첫 줄이면 대기 문구를 지우고 다시 그림
 });
-listen("agent_done", (ev) => { const a = ev.payload; const cur = state.get(a.id) || {}; state.set(a.id, { ...cur, ...a, output: cur.output || [], _stat: null }); render(); });
+listen("agent_done", (ev) => {
+  const a = ev.payload; const cur = state.get(a.id) || {};
+  const merged = { ...cur, ...a, output: cur.output || [], _stat: null };
+  state.set(a.id, merged);
+  addWeekly(a.id, (merged.tokens_in || 0) + (merged.tokens_out || 0)); // 주간 누적(작업당 1회)
+  render();
+});
 listen("agent_removed", (ev) => {
   const id = ev.payload.id; state.delete(id);
   const i = openTabs.indexOf(id); if (i >= 0) openTabs.splice(i, 1);

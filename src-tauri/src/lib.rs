@@ -26,6 +26,9 @@ struct AgentInfo {
     cost: Option<f64>,
     pid: Option<u32>,
     port: Option<u16>,     // 감지된 dev 서버 포트(미리보기)
+    tokens_in: Option<u64>,  // 누적 입력 토큰
+    tokens_out: Option<u64>, // 누적 출력 토큰
+    ctx: Option<u64>,        // 마지막 턴의 컨텍스트 크기(입력+캐시읽기)
 }
 
 struct AppState {
@@ -406,6 +409,9 @@ fn create_agent(
         cost: None,
         pid: None,
         port: None,
+        tokens_in: None,
+        tokens_out: None,
+        ctx: None,
     };
     state.agents.lock().unwrap().insert(id.clone(), info.clone());
     let _ = app.emit("agent_update", info);
@@ -414,24 +420,25 @@ fn create_agent(
     let team = team.unwrap_or(false);
     let keepgoing = keepgoing.unwrap_or(false);
     let use_subscription = authmode.as_deref() != Some("api"); // 기본: 구독(앱 플랜) 사용
+    // 사용자 요청을 '맨 앞'에 두어 절대 묻히지 않게 하고, 오케스트레이션 안내는 짧게 뒤에 붙인다.
     let effective_prompt = if team {
         format!(
-            "당신은 '팀장'입니다. 다음 일을 작은 단위로 쪼개 적합한 전문가(서브에이전트: oracle 설계, \
-librarian 검색, implementer 구현, debugger 디버깅, code-reviewer 검토)에게 병렬로 위임해 끝까지 완수하세요. \
-각 단계 결과를 모아 검토하고, 끝나면 누가 무엇을 했는지 한국어로 요약하세요:\n\n{prompt}"
+            "{prompt}\n\n\
+— 위 요청을 작은 단위로 쪼개 적합한 전문가(서브에이전트: oracle 설계·근본원인, librarian 검색, \
+implementer 구현, debugger 디버깅, code-reviewer 검토, plan 계획, security 보안)에게 가능하면 병렬로 위임해 \
+끝까지 완수하고, 끝나면 누가 무엇을 했는지 한국어로 요약하세요."
         )
     } else {
         match agent.as_deref() {
             Some(name) if !name.is_empty() => format!(
-                "다음 작업을 `{name}` 전문가(서브에이전트)에게 위임해 끝까지 처리하고, 끝나면 무엇을 했는지 한국어로 요약하세요:\n\n{prompt}"
+                "{prompt}\n\n— 위 요청을 `{name}` 전문가(서브에이전트)에게 위임해 끝까지 처리하고, 끝나면 무엇을 했는지 한국어로 요약하세요."
             ),
-            // 기본: 오케스트레이터가 전문가·스킬을 스스로 고르고, 없으면 스킬을 만들어 진행
+            // 기본: 오케스트레이터가 전문가·스킬을 스스로 고른다 (안내는 짧게)
             _ => format!(
-                "당신은 오케스트레이터입니다. 사용자 요청을 분석해서 다음을 스스로 수행하세요:\n\
-1) 필요한 전문가(서브에이전트: oracle 설계·근본원인, librarian 검색, implementer 구현, debugger 디버깅, code-reviewer 검토, plan 계획, security 보안)와 스킬을 스스로 고른다.\n\
-2) 재사용할 만한 능력인데 맞는 스킬이 없으면 `~/.claude/skills/<이름>/SKILL.md`로 새 스킬을 만들어 등록한 뒤 사용한다.\n\
-3) 적절하면 Task 도구로 전문가에게 (가능하면 병렬로) 위임해 실행하고, 각 결과를 모아 검토한다.\n\
-4) 끝나면 어떤 전문가/스킬을 왜 썼고 무엇을 했는지 한국어로 요약한다.\n\n요청:\n{prompt}"
+                "{prompt}\n\n\
+— 위 요청을 끝까지 처리하세요. 필요하면 적합한 전문가(서브에이전트: oracle/librarian/implementer/debugger/code-reviewer/plan/security)와 \
+스킬을 스스로 골라 쓰고, 마땅한 스킬이 없는데 재사용할 가치가 있으면 새 스킬을 만들어도 됩니다. \
+모호하면 합리적으로 가정해 진행하고, 끝나면 무엇을 했는지 한국어로 요약하세요."
             ),
         }
     };
@@ -551,6 +558,26 @@ fn run_agent(
             match serde_json::from_str::<Value>(line) {
                 Ok(evt) => {
                     process_teammates(&app, &id, &evt, &mut teammates);
+                    // 토큰/컨텍스트 사용량 추적
+                    if let Some((tin, tout, ctx)) = usage_of(&evt) {
+                        let is_result = evt.get("type").and_then(|v| v.as_str()) == Some("result");
+                        let snapshot = {
+                            let state = app.state::<AppState>();
+                            let mut agents = state.agents.lock().unwrap();
+                            agents.get_mut(&id).map(|a| {
+                                if is_result {
+                                    a.tokens_in = Some(tin);
+                                    a.tokens_out = Some(tout);
+                                } else {
+                                    // 진행 중 턴: 출력은 누적 최대, 컨텍스트는 최신값
+                                    a.tokens_out = Some(a.tokens_out.unwrap_or(0).max(tout));
+                                }
+                                if ctx > 0 { a.ctx = Some(ctx); }
+                                a.clone()
+                            })
+                        };
+                        if let Some(info) = snapshot { let _ = app.emit("agent_update", info); }
+                    }
                     if evt.get("type").and_then(|v| v.as_str()) == Some("result") {
                         if let Some(cost) = evt.get("total_cost_usd").and_then(|v| v.as_f64()) {
                             {
@@ -582,6 +609,18 @@ fn run_agent(
     if let Some(a) = agents.get(&id) {
         let _ = app.emit("agent_done", a.clone());
     }
+}
+
+// 이벤트에서 토큰 사용량을 읽는다. (in, out, 컨텍스트=입력+캐시) — result 또는 assistant 메시지 모두 지원.
+fn usage_of(evt: &Value) -> Option<(u64, u64, u64)> {
+    let u = evt
+        .get("usage")
+        .or_else(|| evt.get("message").and_then(|m| m.get("usage")))?;
+    let g = |k: &str| u.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+    let input = g("input_tokens");
+    let output = g("output_tokens");
+    let ctx = input + g("cache_read_input_tokens") + g("cache_creation_input_tokens");
+    Some((input, output, ctx))
 }
 
 // 팀 모드에서 서브에이전트(Task) 호출/완료를 추적해 UI에 전문가별 진행을 알린다.
@@ -771,6 +810,9 @@ fn restore_agents(app: AppHandle, repo: String) -> Vec<AgentInfo> {
                     cost: None,
                     pid: None,
                     port: None,
+                    tokens_in: None,
+                    tokens_out: None,
+                    ctx: None,
                 };
                 state.agents.lock().unwrap().insert(id, info);
             }
