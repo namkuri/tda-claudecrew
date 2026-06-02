@@ -82,6 +82,11 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **레시피 인앱 편집기**: ＋레시피 만들기 모달(이름/이모지/문구/전문가/속도/안전), 커스텀 레시피 우클릭 편집·삭제.
   - **배포 전 검토 게이트**: 🚦 레시피 → pre-publish-review 스킬(다중 관점 병렬).
   - **플러그인 빌드**: `node scripts/build-plugin.mjs`가 `claudecrew-plugin/`을 원본으로 채우고 버전 동기화. `src-tauri/AGENTS.md` 거버넌스.
+- **워크스테이션 UI(v0.7 — Superset식 3-컬럼)**:
+  - **좌 사이드바**: 저장소명+작업 수, 워크스페이스 목록(상태점·이름·브랜치·diff ±·#id), Claude 연결/모델/사용량/상한.
+  - **중앙**: 에이전트별 **터미널 탭**(상태점·닫기) + "＋새 작업"(컴포저). 선택 작업은 **Claude 캐릭터(코랄 `--claude`, 상태별 색/바운스) + 말풍선**("저 작업 끝냈어요!" 등)으로 직관 표시 + 팀원 칩·터미널 로그·액션.
+  - **우 Git 패널**: 기준 main, 커밋 메시지+커밋(commit_agent), "main 대비 변경" 파일 목록(±, 클릭 시 거시→미시 diff 모달).
+  - 사이드바 ± 통계는 `ensureStat`로 get_diff 1회 캐싱. 새 작업 생성 시 자동 탭 오픈. 데모 검증 완료.
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.

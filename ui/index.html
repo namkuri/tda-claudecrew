@@ -48,23 +48,47 @@
   </div>
 </div>
 
-<!-- 메인 -->
+<!-- 메인 (3-컬럼: 워크스페이스 | 에이전트 무대 | Git) -->
 <div id="app" class="hidden">
-  <header>
-    <div class="brand sm">Claude<b>Crew</b></div>
-    <div class="folder" id="folderLabel" data-i18n="noFolder">폴더 없음</div>
-    <button class="chip" id="btnChangeFolder" data-i18n="changeFolder">폴더 변경</button>
-    <div class="spacer"></div>
-    <button class="chip" id="btnLang" title="언어 / Language">EN</button>
-    <label class="capctl" data-i18n-title="capTitle" title="이번 세션 비용이 이 금액에 닿으면 진행 중인 작업을 자동으로 멈춰요"><span data-i18n="cap">상한 $</span><input id="costCap" type="number" min="0" step="0.5" value="5" /></label>
-    <div class="meter" data-i18n-title="usageTitle" title="이번 세션 예상 사용량"><span data-i18n="usage">사용량 </span><b id="costTotal">$0.00</b></div>
-    <span id="apiHint" class="api-hint hidden" data-i18n-title="apiHintTitle" data-i18n="apiHint" title="여러 작업을 동시에 돌리면 구독 한도를 빨리 써요">⚡ 많이 쓰는 중 — API 키 연결을 권해요</span>
-    <span id="apiMode" class="api-mode hidden" data-i18n-title="apiModeTitle" data-i18n="apiMode" title="환경에 API 키가 설정되어 API 경로로 동작 중이에요">✓ API 모드</span>
-  </header>
+  <!-- 좌: 워크스페이스 사이드바 -->
+  <aside class="sidebar">
+    <div class="side-top">
+      <div class="brand sm">Claude<b>Crew</b></div>
+      <button class="chip" id="btnLang" title="언어 / Language">EN</button>
+    </div>
 
-  <div id="costBanner" class="banner hidden"></div>
+    <div class="claude-status">
+      <div class="cs-main"><span class="cs-dot" id="csDot"></span><span class="cs-model" id="csModel">Claude Code</span><span class="cs-plan" id="csPlan"></span></div>
+      <div class="cs-sub">
+        <span data-i18n="usage">사용량 </span><b id="costTotal">$0.00</b>
+        <span class="cs-sep">·</span>
+        <label class="capctl" data-i18n-title="capTitle" title="이번 세션 비용이 이 금액에 닿으면 진행 중인 작업을 자동으로 멈춰요"><span data-i18n="cap">상한 $</span><input id="costCap" type="number" min="0" step="0.5" value="5" /></label>
+      </div>
+      <span id="apiHint" class="api-hint hidden" data-i18n-title="apiHintTitle" data-i18n="apiHint" title="여러 작업을 동시에 돌리면 구독 한도를 빨리 써요">⚡ 많이 쓰는 중 — API 키 연결을 권해요</span>
+      <span id="apiMode" class="api-mode hidden" data-i18n-title="apiModeTitle" data-i18n="apiMode" title="환경에 API 키가 설정되어 API 경로로 동작 중이에요">✓ API 모드</span>
+    </div>
 
-  <section class="composer">
+    <div class="repo-group">
+      <div class="repo-head">
+        <span class="repo-name" id="repoName" data-i18n="noFolder">폴더 없음</span>
+        <span class="repo-count" id="repoCount">0</span>
+      </div>
+      <div class="ws-row base" id="wsBase" title="기준 브랜치"><span class="ws-br">⎇</span><span class="ws-title">main</span></div>
+      <div class="ws-list" id="wsList"></div>
+    </div>
+
+    <div class="side-foot">
+      <button class="btn go sm" id="btnNew" data-i18n="newTask">＋ 새 작업</button>
+      <button class="chip" id="btnChangeFolder" data-i18n="changeFolder">폴더 변경</button>
+    </div>
+  </aside>
+
+  <!-- 중: 에이전트 탭 + 무대 -->
+  <main class="center">
+    <div class="agent-tabs" id="agentTabs"></div>
+    <div class="stage">
+      <section class="agent-view hidden" id="agentView"></section>
+      <section class="composer" id="composerView">
     <div class="recipes">
       <button class="recipe" data-r="bug" data-i18n="r_bug">🐞 버그 고치기</button>
       <button class="recipe" data-r="feature" data-i18n="r_feature">✨ 기능 추가</button>
@@ -104,11 +128,16 @@
       </label>
       <button class="btn go" id="btnRun" data-i18n="run">▶ 전문가에게 맡기기</button>
     </div>
-  </section>
-
-  <main id="board">
-    <div class="empty" id="emptyMsg" data-i18n="empty">아직 맡긴 일이 없어요. 위에서 레시피를 고르거나 부탁을 적고 ▶ 를 눌러보세요.</div>
+      </section>
+    </div>
   </main>
+
+  <!-- 우: Git 패널 (선택한 작업의 저장소 상태) -->
+  <aside class="gitpanel" id="gitpanel">
+    <div class="gp-empty" data-i18n="gpEmpty">작업을 선택하면 변경/커밋 상태가 여기에 보여요.</div>
+  </aside>
+
+  <div id="costBanner" class="banner hidden"></div>
 </div>
 
 <!-- 바뀐 점 -->

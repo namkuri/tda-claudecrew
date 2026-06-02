@@ -58,6 +58,10 @@ const I18N = {
     rtext_cleanup: "다음을 안전한 범위에서 정리·리팩터링해주세요(동작은 그대로): ", rtext_review: "다음 코드/변경을 검토하고 개선점을 알려주세요: ",
     rtext_plan: "다음 작업을 hyperplan(적대적 다중 에이전트 계획)으로 계획 세워주세요: ", rtext_security: "다음을 security-research 스킬로 보안 점검해주세요(보고만, 파일 미수정): ",
     rtext_gate: "현재 변경을 pre-publish-review 스킬로 배포 전에 여러 관점으로 병렬 검토해주세요(막음 항목이 있으면 보류): ",
+    newTask: "＋ 새 작업", newTabLabel: "＋ 새 작업", connected: "연결됨", disconnected: "연결 안 됨", demoConn: "데모 모드",
+    gpEmpty: "작업을 선택하면 변경/커밋 상태가 여기에 보여요.", gpBase: "기준", gpAgainst: "main 대비 변경", gpCommitPh: "저장(커밋) 메시지…", gpCommit: "커밋", gpNoChange: "바뀐 점이 없어요.",
+    avApply: "적용", avStop: "멈추기", avRevert: "되돌리기", avDiff: "전체 diff", termWaiting: "에이전트를 기다리는 중…",
+    sb_creating: "저 준비하고 있어요…", sb_running: "저 지금 작업하는 중이에요!", sb_done: "저 작업 끝냈어요! ✅", sb_committed: "저장까지 마쳤어요! 💾", sb_error: "앗, 문제가 생겼어요 😵", sb_stopped: "잠깐 멈췄어요 ⏸",
   },
   en: {
     lead: "The easiest way to hand work to a team of AI experts.<br/>Just 3 steps to get started!",
@@ -109,6 +113,10 @@ const I18N = {
     rtext_cleanup: "Please clean up / refactor the following safely (keep behavior the same): ", rtext_review: "Please review the following code/change and suggest improvements: ",
     rtext_plan: "Please plan the following task using hyperplan (adversarial multi-agent planning): ", rtext_security: "Please do a security check on the following with the security-research skill (report only, no edits): ",
     rtext_gate: "Please run a pre-publish review on the current changes with the pre-publish-review skill (parallel, multi-perspective; hold if any blocker): ",
+    newTask: "＋ New task", newTabLabel: "＋ New task", connected: "Connected", disconnected: "Not connected", demoConn: "Demo mode",
+    gpEmpty: "Select a task to see its changes and commit status here.", gpBase: "Base", gpAgainst: "Changes vs main", gpCommitPh: "Commit message…", gpCommit: "Commit", gpNoChange: "No changes.",
+    avApply: "Apply", avStop: "Stop", avRevert: "Revert", avDiff: "Full diff", termWaiting: "Waiting for the agent…",
+    sb_creating: "Getting ready…", sb_running: "I'm working on it!", sb_done: "All done! ✅", sb_committed: "Saved it! 💾", sb_error: "Oops, something went wrong 😵", sb_stopped: "Paused for now ⏸",
   },
 };
 let lang = localStorage.getItem("cc_lang") || "ko";
@@ -124,9 +132,9 @@ function applyI18n(){
   document.querySelectorAll("[data-i18n-ph]").forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
   document.querySelectorAll("[data-i18n-title]").forEach(el => { el.title = t(el.dataset.i18nTitle); });
   const lb = $("#btnLang"); if (lb) lb.textContent = lang === "ko" ? "EN" : "한국어";
-  if ($("#folderLabel")) $("#folderLabel").textContent = repoPath || t("noFolder");
+  if ($("#repoName")) $("#repoName").textContent = repoBaseName();
   renderCustomRecipes();
-  if (state && state.size) render();
+  render();
   const badge = document.querySelector(".demo-badge"); if (badge) badge.textContent = t("demoBadge");
 }
 
@@ -182,6 +190,16 @@ const $ = (s) => document.querySelector(s);
 const state = new Map();        // id -> agent
 let repoPath = localStorage.getItem("cc_repo") || "";
 let checkedOk = false, folderOk = !!repoPath, setupOk = localStorage.getItem("cc_setup") === "1";
+let selectedId = null;          // 현재 선택된 작업(null = 새 작업/컴포저)
+const openTabs = [];            // 열린 탭(작업 id 순서)
+let apiMode = false;
+
+function repoBaseName(){
+  if (!repoPath) return t("noFolder");
+  const p = repoPath.replace(/[\\/]+$/, "");
+  const m = p.split(/[\\/]/).filter(Boolean).pop();
+  return m || repoPath;
+}
 
 // 레시피: 메타데이터(텍스트는 i18n rtext_*), 커스텀은 customRecipes에 text 보관
 const RECIPES = {
@@ -252,13 +270,19 @@ $("#btnStart").addEventListener("click", () => {
 });
 
 // ---------- 메인 ----------
-let apiMode = false;
 function enterApp(){
-  $("#folderLabel").textContent = repoPath || t("noFolder");
+  $("#repoName").textContent = repoBaseName();
+  // Claude 연결/모델 표시
+  $("#csDot").classList.toggle("on", true);
+  invoke("check_claude").then(v => {
+    $("#csModel").textContent = DEMO ? "Claude Code" : String(v).split("·")[0].trim() || "Claude Code";
+    $("#csPlan").textContent = DEMO ? t("demoConn") : t("connected");
+  }).catch(() => { $("#csDot").classList.remove("on"); $("#csPlan").textContent = t("disconnected"); });
   loadAgents();
   invoke("get_cost_cap").then(v => { if (v != null) $("#costCap").value = v; }).catch(()=>{});
   // 환경에 API 키가 있으면 'API 모드' 표시(키는 저장하지 않음 — 안전 원칙)
   invoke("check_api_mode").then(on => { apiMode = !!on; $("#apiMode")?.classList.toggle("hidden", !apiMode); }).catch(()=>{});
+  showComposer();
 }
 
 $("#costCap").addEventListener("change", () => {
@@ -313,7 +337,7 @@ function showHint(msg){
 
 $("#btnChangeFolder").addEventListener("click", async () => {
   const picked = await dialog.open({ directory: true, multiple: false, title: t("pickFolderTitle") });
-  if (picked) { repoPath = picked; localStorage.setItem("cc_repo", repoPath); $("#folderLabel").textContent = repoPath; }
+  if (picked) { repoPath = picked; localStorage.setItem("cc_repo", repoPath); $("#repoName").textContent = repoBaseName(); state.clear(); openTabs.length = 0; selectedId = null; loadAgents(); }
 });
 
 // ---------- 레시피 (내장 + 사용자 커스텀 = 마켓/공유) ----------
@@ -474,48 +498,177 @@ function renderTeammates(a){
   return `<div class="mates">${t("mates")} ${chips}</div>`;
 }
 
+function shortId(id){ const m = String(id).match(/\d+/); return m ? m[0] : String(id).slice(-4); }
+function tabTitle(a){ const s = (a.prompt || a.branch || a.id).trim(); return s.length > 18 ? s.slice(0, 18) + "…" : s; }
+
+// 상태 → Claude 캐릭터 말풍선
+function speech(a){
+  const job = (a.prompt || "").trim();
+  const sub = job ? (job.length > 64 ? job.slice(0, 64) + "…" : job) : "";
+  const key = "sb_" + a.status;
+  const msg = t(key) !== key ? t(key) : (t("status_" + a.status) || a.status);
+  return { msg, sub };
+}
+
+// 사이드바 diff 통계(±)를 한 번만 가져와 캐싱
+async function ensureStat(id){
+  const a = state.get(id);
+  if (!a || a._stat || a._statLoading) return;
+  a._statLoading = true;
+  try {
+    const diff = await invoke("get_diff", { id });
+    if (diff && typeof diff === "string" && diff.trim() && diff.trim() !== "(바뀐 점 없음)"){
+      const files = parseDiff(diff);
+      a._stat = { adds: files.reduce((s,f)=>s+f.adds,0), dels: files.reduce((s,f)=>s+f.dels,0), files };
+    } else { a._stat = { adds: 0, dels: 0, files: [] }; }
+  } catch (_) { a._stat = { adds: 0, dels: 0, files: [] }; }
+  a._statLoading = false;
+  renderSidebar();
+  if (selectedId === id) renderGit();
+}
+
+// 선택/탭/컴포저 전환
+function openTab(id){ if (!openTabs.includes(id)) openTabs.push(id); }
+function selectAgent(id){ if (!state.has(id)) return; openTab(id); selectedId = id; render(); }
+function closeTab(id){
+  const i = openTabs.indexOf(id); if (i >= 0) openTabs.splice(i, 1);
+  if (selectedId === id) selectedId = openTabs.length ? openTabs[Math.min(i, openTabs.length - 1)] : null;
+  render();
+}
+function showComposer(){ selectedId = null; render(); }
+
+// ---------- 렌더 ----------
 function render(){
-  const board = $("#board");
+  renderStatusStrip();
+  renderSidebar();
+  renderTabs();
+  renderStage();
+  renderGit();
+}
+
+function renderStatusStrip(){
   const total = costTotal();
   $("#costTotal").textContent = "$" + total.toFixed(2);
   const cap = parseFloat($("#costCap")?.value);
   $("#costTotal").classList.toggle("warn", !isNaN(cap) && cap > 0 && total >= cap * 0.8);
   const running = [...state.values()].filter(a => a.status === "running" || a.status === "creating").length;
   $("#apiHint")?.classList.toggle("hidden", running < 3 || apiMode); // API 모드면 한도 걱정 불필요
-  if (state.size === 0){ board.innerHTML = `<div class="empty">${t("empty")}</div>`; return; }
-  board.innerHTML = "";
+}
+
+function renderSidebar(){
+  $("#repoName").textContent = repoBaseName();
+  $("#repoCount").textContent = state.size;
+  const list = $("#wsList"); if (!list) return;
+  list.innerHTML = "";
   [...state.values()].forEach(a => {
-    const logHtml = (a.output || []).map(markTool).join("\n");
-    const card = document.createElement("div");
-    card.className = "card";
-    card.innerHTML = `
-      <div class="top">
-        <span class="pill ${a.status}">${t("status_" + a.status) || a.status}</span>
-        <span class="title">${esc(a.branch)}</span>
-        ${a.cost != null ? `<span class="cost">$${Number(a.cost).toFixed(4)}</span>` : ""}
-      </div>
-      <div class="ask">${esc(a.prompt)}</div>
-      ${renderTeammates(a)}
-      <div class="log" id="log-${a.id}">${logHtml}</div>
-      <div class="acts">
-        <button data-act="diff">${t("diffTitle")}</button>
-        ${a.port ? `<button data-act="preview" class="primary">${t("preview", a.port)}</button>` : ""}
-        <button data-act="apply" class="primary">${lang === "ko" ? "적용하기" : "Apply"}</button>
-        <button data-act="stop">${lang === "ko" ? "멈추기" : "Stop"}</button>
-        <button data-act="cleanup">${lang === "ko" ? "되돌리기" : "Revert"}</button>
-      </div>`;
-    card.querySelector('[data-act="diff"]').onclick = () => viewDiff(a.id);
-    const previewBtn = card.querySelector('[data-act="preview"]');
-    if (previewBtn) previewBtn.onclick = () => invoke("open_url", { url: "http://localhost:" + a.port });
-    card.querySelector('[data-act="apply"]').onclick = () => applyChanges(a.id);
-    card.querySelector('[data-act="stop"]').onclick = () => invoke("stop_agent", { id: a.id });
-    card.querySelector('[data-act="cleanup"]').onclick = () => {
-      if (confirm(t("cleanupConfirm"))) invoke("cleanup_agent", { id: a.id });
-    };
-    board.appendChild(card);
-    const log = card.querySelector(".log"); log.scrollTop = log.scrollHeight;
+    ensureStat(a.id);
+    const st = a._stat || { adds: 0, dels: 0 };
+    const row = document.createElement("div");
+    row.className = "ws-item" + (a.id === selectedId ? " active" : "");
+    row.dataset.id = a.id;
+    row.innerHTML =
+      `<span class="ws-st ${a.status}" title="${t("status_" + a.status) || a.status}"></span>` +
+      `<span class="ws-name">${esc((a.prompt || a.branch || a.id).trim() || a.id)}</span>` +
+      `<span class="ws-branch">${esc(a.branch || "")}</span>` +
+      `<span class="ws-stat"><span class="gp-add">+${st.adds}</span><span class="gp-del">-${st.dels}</span></span>` +
+      `<span class="ws-id">#${shortId(a.id)}</span>`;
+    list.appendChild(row);
   });
 }
+
+function renderTabs(){
+  const tabs = $("#agentTabs"); if (!tabs) return;
+  tabs.innerHTML = "";
+  openTabs.filter(id => state.has(id)).forEach(id => {
+    const a = state.get(id);
+    const tab = document.createElement("div");
+    tab.className = "atab" + (id === selectedId ? " active" : "");
+    tab.dataset.id = id;
+    tab.innerHTML = `<span class="tab-st ${a.status}"></span><span>${esc(tabTitle(a))}</span><span class="tab-x" data-x="${id}">✕</span>`;
+    tabs.appendChild(tab);
+  });
+  const nt = document.createElement("div");
+  nt.className = "atab new" + (selectedId === null ? " active" : "");
+  nt.dataset.new = "1";
+  nt.textContent = t("newTabLabel");
+  tabs.appendChild(nt);
+}
+
+function renderStage(){
+  const comp = $("#composerView"), av = $("#agentView");
+  if (selectedId && state.has(selectedId)){
+    comp.classList.add("hidden"); av.classList.remove("hidden");
+    renderAgentView(state.get(selectedId));
+  } else {
+    av.classList.add("hidden"); comp.classList.remove("hidden");
+  }
+}
+
+function renderAgentView(a){
+  const av = $("#agentView");
+  const sp = speech(a);
+  const logHtml = (a.output || []).map(markTool).join("\n");
+  av.innerHTML =
+    `<div class="char-strip">
+       <div class="cc-char ${a.status}"><div class="cc-body"></div></div>
+       <div class="speech">${esc(sp.msg)}${sp.sub ? `<span class="sub">${esc(sp.sub)}</span>` : ""}</div>
+     </div>
+     <div class="av-head">
+       <span class="av-model">${esc(a.branch || a.id)}</span>
+       <span>· ${t("status_" + a.status) || a.status}</span>
+       ${a.model ? `<span>· ${esc(a.model)}</span>` : ""}
+       ${a.cost != null ? `<span class="av-cost">$${Number(a.cost).toFixed(4)}</span>` : ""}
+     </div>
+     ${renderTeammates(a)}
+     <div class="term" id="term-${a.id}">${logHtml || `<span style="color:var(--faint)">${esc(t("termWaiting"))}</span>`}</div>
+     <div class="av-acts">
+       ${a.port ? `<button data-act="preview" class="primary">${t("preview", a.port)}</button>` : ""}
+       <button data-act="apply" class="primary">${t("avApply")}</button>
+       <button data-act="diff">${t("avDiff")}</button>
+       <button data-act="stop">${t("avStop")}</button>
+       <button data-act="cleanup">${t("avRevert")}</button>
+     </div>`;
+  const term = $("#term-" + a.id); if (term) term.scrollTop = term.scrollHeight;
+  av.querySelector('[data-act="apply"]').onclick = () => applyChanges(a.id);
+  av.querySelector('[data-act="diff"]').onclick = () => viewDiff(a.id);
+  av.querySelector('[data-act="stop"]').onclick = () => invoke("stop_agent", { id: a.id });
+  av.querySelector('[data-act="cleanup"]').onclick = () => { if (confirm(t("cleanupConfirm"))) invoke("cleanup_agent", { id: a.id }); };
+  const pv = av.querySelector('[data-act="preview"]'); if (pv) pv.onclick = () => invoke("open_url", { url: "http://localhost:" + a.port });
+}
+
+function renderGit(){
+  const gp = $("#gitpanel"); if (!gp) return;
+  if (!(selectedId && state.has(selectedId))){ gp.innerHTML = `<div class="gp-empty">${t("gpEmpty")}</div>`; return; }
+  const a = state.get(selectedId); const st = a._stat;
+  const filesHtml = st && st.files && st.files.length
+    ? st.files.map(f => `<div class="gp-file" data-fdiff="1"><span class="fn">${esc(f.name)}</span><span class="fst"><span class="gp-add">+${f.adds}</span><span class="gp-del">-${f.dels}</span></span></div>`).join("")
+    : `<div class="gp-empty" style="padding:4px 6px">${t("gpNoChange")}</div>`;
+  gp.innerHTML =
+    `<div class="gp-head">${t("gpBase")}: <b>main</b> · #${shortId(a.id)}</div>
+     <div class="gp-commit">
+       <textarea id="gpMsg" placeholder="${esc(t("gpCommitPh"))}"></textarea>
+       <button class="btn go" id="gpCommitBtn">✓ ${t("gpCommit")}</button>
+     </div>
+     <div class="gp-sec">
+       <h4>${t("gpAgainst")}<span class="n">${st ? st.files.length : 0}</span></h4>
+       ${filesHtml}
+     </div>`;
+  $("#gpCommitBtn").onclick = async () => {
+    const msg = $("#gpMsg").value;
+    try { const res = await invoke("commit_agent", { id: a.id, message: msg || "" }); showHint(typeof res === "string" ? res : t("status_committed")); a._stat = null; loadAgents(); }
+    catch (e) { alert(t("saveFail") + e); }
+  };
+  gp.querySelectorAll('[data-fdiff]').forEach(el => el.onclick = () => viewDiff(a.id));
+}
+
+// 사이드바/탭 클릭(이벤트 위임) + 새 작업
+$("#wsList").addEventListener("click", (e) => { const row = e.target.closest(".ws-item"); if (row) selectAgent(row.dataset.id); });
+$("#agentTabs").addEventListener("click", (e) => {
+  const x = e.target.closest("[data-x]"); if (x){ e.stopPropagation(); closeTab(x.dataset.x); return; }
+  if (e.target.closest(".atab.new")){ showComposer(); return; }
+  const tab = e.target.closest(".atab"); if (tab && tab.dataset.id) selectAgent(tab.dataset.id);
+});
+$("#btnNew").addEventListener("click", showComposer);
 
 // ---------- 적용하기(변경 저장) ----------
 async function applyChanges(id){
@@ -591,16 +744,27 @@ async function viewDiff(id){
 $("#diffClose").addEventListener("click", () => $("#diffModal").classList.add("hidden"));
 
 // ---------- 이벤트 수신 ----------
-listen("agent_update", (ev) => { const a = ev.payload; const cur = state.get(a.id) || {}; state.set(a.id, { ...cur, ...a, output: cur.output || [] }); render(); });
+listen("agent_update", (ev) => {
+  const a = ev.payload; const isNew = !state.has(a.id);
+  const cur = state.get(a.id) || {}; state.set(a.id, { ...cur, ...a, output: cur.output || [] });
+  if (isNew) selectAgent(a.id); else render(); // 새 작업이면 자동으로 열어 보여줌
+});
 listen("agent_output", (ev) => {
   const { id, text } = ev.payload; const a = state.get(id); if (!a) return;
+  const wasEmpty = !(a.output && a.output.length);
   (a.output = a.output || []).push(text);
-  const log = document.getElementById("log-" + id);
-  if (log) { log.insertAdjacentHTML("beforeend", (log.innerHTML ? "\n" : "") + markTool(text)); log.scrollTop = log.scrollHeight; }
-  else render();
+  if (id !== selectedId) return;                 // 안 보이는 탭은 상태만 누적
+  const term = document.getElementById("term-" + id);
+  if (term && !wasEmpty) { term.insertAdjacentHTML("beforeend", "\n" + markTool(text)); term.scrollTop = term.scrollHeight; }
+  else renderStage();                            // 첫 줄이면 대기 문구를 지우고 다시 그림
 });
-listen("agent_done", (ev) => { const a = ev.payload; const cur = state.get(a.id) || {}; state.set(a.id, { ...cur, ...a, output: cur.output || [] }); render(); });
-listen("agent_removed", (ev) => { state.delete(ev.payload.id); render(); });
+listen("agent_done", (ev) => { const a = ev.payload; const cur = state.get(a.id) || {}; state.set(a.id, { ...cur, ...a, output: cur.output || [], _stat: null }); render(); });
+listen("agent_removed", (ev) => {
+  const id = ev.payload.id; state.delete(id);
+  const i = openTabs.indexOf(id); if (i >= 0) openTabs.splice(i, 1);
+  if (selectedId === id) selectedId = openTabs.length ? openTabs[openTabs.length - 1] : null;
+  render();
+});
 listen("teammate_update", (ev) => {
   const { agentId, name, status } = ev.payload || {};
   const a = state.get(agentId); if (!a) return;
