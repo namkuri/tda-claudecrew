@@ -375,6 +375,7 @@ fn create_agent(
     agent: Option<String>,
     keepgoing: Option<bool>,
     team: Option<bool>,
+    authmode: Option<String>,
 ) -> Result<String, String> {
     if !PathBuf::from(&repo).join(".git").exists() {
         return Err(format!("선택한 폴더가 git 프로젝트가 아닙니다: {repo}"));
@@ -409,9 +410,10 @@ fn create_agent(
     state.agents.lock().unwrap().insert(id.clone(), info.clone());
     let _ = app.emit("agent_update", info);
 
-    // 팀 모드 > 단일 전문가 위임 > 원문 (표시용 prompt는 원문 유지)
+    // 팀 모드 > 단일 전문가 위임 > 자동 오케스트레이션(기본) (표시용 prompt는 원문 유지)
     let team = team.unwrap_or(false);
     let keepgoing = keepgoing.unwrap_or(false);
+    let use_subscription = authmode.as_deref() != Some("api"); // 기본: 구독(앱 플랜) 사용
     let effective_prompt = if team {
         format!(
             "당신은 '팀장'입니다. 다음 일을 작은 단위로 쪼개 적합한 전문가(서브에이전트: oracle 설계, \
@@ -423,7 +425,14 @@ librarian 검색, implementer 구현, debugger 디버깅, code-reviewer 검토)�
             Some(name) if !name.is_empty() => format!(
                 "다음 작업을 `{name}` 전문가(서브에이전트)에게 위임해 끝까지 처리하고, 끝나면 무엇을 했는지 한국어로 요약하세요:\n\n{prompt}"
             ),
-            _ => prompt,
+            // 기본: 오케스트레이터가 전문가·스킬을 스스로 고르고, 없으면 스킬을 만들어 진행
+            _ => format!(
+                "당신은 오케스트레이터입니다. 사용자 요청을 분석해서 다음을 스스로 수행하세요:\n\
+1) 필요한 전문가(서브에이전트: oracle 설계·근본원인, librarian 검색, implementer 구현, debugger 디버깅, code-reviewer 검토, plan 계획, security 보안)와 스킬을 스스로 고른다.\n\
+2) 재사용할 만한 능력인데 맞는 스킬이 없으면 `~/.claude/skills/<이름>/SKILL.md`로 새 스킬을 만들어 등록한 뒤 사용한다.\n\
+3) 적절하면 Task 도구로 전문가에게 (가능하면 병렬로) 위임해 실행하고, 각 결과를 모아 검토한다.\n\
+4) 끝나면 어떤 전문가/스킬을 왜 썼고 무엇을 했는지 한국어로 요약한다.\n\n요청:\n{prompt}"
+            ),
         }
     };
 
@@ -431,7 +440,7 @@ librarian 검색, implementer 구현, debugger 디버깅, code-reviewer 검토)�
     let app2 = app.clone();
     let id_for_thread = id.clone();
     std::thread::spawn(move || {
-        run_agent(app2, id_for_thread, repo, effective_prompt, model, permission, branch, worktree, keepgoing);
+        run_agent(app2, id_for_thread, repo, effective_prompt, model, permission, branch, worktree, keepgoing, use_subscription);
     });
 
     Ok(id)
@@ -457,6 +466,7 @@ fn run_agent(
     branch: String,
     worktree: String,
     keepgoing: bool,
+    use_subscription: bool,
 ) {
     // 1) worktree 생성
     std::fs::create_dir_all(PathBuf::from(&repo).join(".agentboard")).ok();
@@ -489,6 +499,12 @@ fn run_agent(
     // "끝까지 모드"가 켜지면 Stop/TeammateIdle 훅이 작동하도록 환경변수 전달
     if keepgoing {
         cmd.env("CLAUDECREW_KEEPGOING", "1");
+    }
+    // 토큰 소스: 구독(앱 플랜) 선택 시 API 키 환경변수를 자식에서 제거 →
+    // Claude Code가 로그인된 구독(Claude Max 등)으로 청구한다. (우리는 키를 만들지 않는다)
+    if use_subscription {
+        cmd.env_remove("ANTHROPIC_API_KEY");
+        cmd.env_remove("ANTHROPIC_AUTH_TOKEN");
     }
 
     let mut child = match cmd.spawn() {
@@ -589,11 +605,12 @@ fn process_teammates(app: &AppHandle, agent_id: &str, evt: &Value, map: &mut Has
                             .or_else(|| input.and_then(|i| i.get("description")).and_then(|v| v.as_str()))
                             .unwrap_or("전문가")
                             .to_string();
-                        let desc = input
+                        let desc_full = input
                             .and_then(|i| i.get("description"))
                             .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
+                            .or_else(|| input.and_then(|i| i.get("prompt")).and_then(|v| v.as_str()))
+                            .unwrap_or("");
+                        let desc: String = desc_full.chars().take(180).collect();
                         if !tuid.is_empty() {
                             map.insert(tuid, name.clone());
                         }
@@ -615,9 +632,17 @@ fn process_teammates(app: &AppHandle, agent_id: &str, evt: &Value, map: &mut Has
                     if b.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
                         if let Some(tuid) = b.get("tool_use_id").and_then(|v| v.as_str()) {
                             if let Some(name) = map.remove(tuid) {
+                                // 서브에이전트 결과 텍스트를 짧게 뽑아 함께 전달
+                                let result_text = b.get("content").map(|c| {
+                                    if let Some(s) = c.as_str() { s.to_string() }
+                                    else if let Some(arr) = c.as_array() {
+                                        arr.iter().filter_map(|x| x.get("text").and_then(|t| t.as_str())).collect::<Vec<_>>().join(" ")
+                                    } else { String::new() }
+                                }).unwrap_or_default();
+                                let snippet: String = result_text.chars().take(220).collect();
                                 let _ = app.emit(
                                     "teammate_update",
-                                    serde_json::json!({ "agentId": agent_id, "name": name, "desc": "", "status": "done" }),
+                                    serde_json::json!({ "agentId": agent_id, "name": name, "desc": "", "result": snippet, "status": "done" }),
                                 );
                             }
                         }

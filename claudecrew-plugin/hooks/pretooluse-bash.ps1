@@ -20,8 +20,8 @@ $patterns = @(
     'mkfs',
     'dd\s+if=',
     'git\s+push\s+.*--force',
-    '\bshutdown\b',
-    '\bformat\b'
+    '\bshutdown\s+/[sr]\b',
+    '\bformat\s+[A-Za-z]:'
 )
 foreach ($p in $patterns) {
     if ($cmd -imatch $p) {

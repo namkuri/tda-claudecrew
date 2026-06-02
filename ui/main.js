@@ -62,6 +62,10 @@ const I18N = {
     gpEmpty: "작업을 선택하면 변경/커밋 상태가 여기에 보여요.", gpBase: "기준", gpAgainst: "main 대비 변경", gpCommitPh: "저장(커밋) 메시지…", gpCommit: "커밋", gpNoChange: "바뀐 점이 없어요.",
     avApply: "적용", avStop: "멈추기", avRevert: "되돌리기", avDiff: "전체 diff", termWaiting: "에이전트를 기다리는 중…",
     sb_creating: "저 준비하고 있어요…", sb_running: "저 지금 작업하는 중이에요!", sb_done: "저 작업 끝냈어요! ✅", sb_committed: "저장까지 마쳤어요! 💾", sb_error: "앗, 문제가 생겼어요 😵", sb_stopped: "잠깐 멈췄어요 ⏸",
+    orchestrator: "오케스트레이터", agentConsole: "에이전트 콘솔", sub_working: "작업 받는 중…", sub_done: "완료",
+    tokenSrc: "토큰", tokenSub: "구독 플랜", tokenApi: "API 키", tokenTitle: "어떤 토큰으로 청구할지 — 구독(앱 플랜) 또는 API 키",
+    composerHint: "무엇을 원하는지 적기만 하면, 알아서 전문가와 스킬을 골라 처리해요. (아래 템플릿은 선택)",
+    quickTpl: "빠른 템플릿 (선택)",
   },
   en: {
     lead: "The easiest way to hand work to a team of AI experts.<br/>Just 3 steps to get started!",
@@ -117,6 +121,10 @@ const I18N = {
     gpEmpty: "Select a task to see its changes and commit status here.", gpBase: "Base", gpAgainst: "Changes vs main", gpCommitPh: "Commit message…", gpCommit: "Commit", gpNoChange: "No changes.",
     avApply: "Apply", avStop: "Stop", avRevert: "Revert", avDiff: "Full diff", termWaiting: "Waiting for the agent…",
     sb_creating: "Getting ready…", sb_running: "I'm working on it!", sb_done: "All done! ✅", sb_committed: "Saved it! 💾", sb_error: "Oops, something went wrong 😵", sb_stopped: "Paused for now ⏸",
+    orchestrator: "Orchestrator", agentConsole: "Agent console", sub_working: "Receiving task…", sub_done: "done",
+    tokenSrc: "Tokens", tokenSub: "Subscription", tokenApi: "API key", tokenTitle: "Which tokens to bill — your subscription (app plan) or an API key",
+    composerHint: "Just write what you want — it picks the right experts and skills for you. (Templates below are optional.)",
+    quickTpl: "Quick templates (optional)",
   },
 };
 let lang = localStorage.getItem("cc_lang") || "ko";
@@ -146,8 +154,9 @@ function makeDemoApi(){
   const agents = {};
   let n = 0;
   function demoRun(args){
-    const sample = ["▶ " + t("status_running"), "🔧 Read", lang === "ko" ? "관련 코드를 찾아 원인을 분석했어요…" : "Found related code and analyzed the cause…",
-                    "🔧 Edit", lang === "ko" ? "수정을 적용했어요. 끝!" : "Applied the fix. Done!"];
+    const ko = lang === "ko";
+    const sample = ["▶ " + (ko ? "오케스트레이터 시작" : "Orchestrator start"), "🔧 Task → debugger", "🔧 Task → implementer",
+                    ko ? "전문가 결과를 모아 검토 중…" : "Collecting expert results…", "🔧 Task → code-reviewer", ko ? "완료. 요약 정리!" : "Done. Summarizing!"];
     const id = "demo" + (++n);
     const a = { id, branch: "demo-" + n, prompt: args.prompt || "demo", model: args.model || "sonnet",
                 permission: args.permission || "acceptEdits", status: "creating", cost: null, output: [] };
@@ -155,12 +164,18 @@ function makeDemoApi(){
     emit("agent_update", { ...a });
     setTimeout(() => { a.status = "running"; emit("agent_update", { ...a }); }, 400);
     sample.forEach((line, i) => setTimeout(() => emit("agent_output", { id, text: line }), 800 + i * 600));
-    if (args.team) {
-      [["debugger", ""], ["implementer", ""], ["code-reviewer", ""]].forEach(([nm], i) => {
-        setTimeout(() => emit("teammate_update", { agentId: id, name: nm, status: "working" }), 900 + i * 500);
-        setTimeout(() => emit("teammate_update", { agentId: id, name: nm, status: "done" }), 1900 + i * 500);
-      });
-    }
+    // 오케스트레이터가 전문가들을 호출(Task)하는 모습 — 멀티 콘솔 시뮬
+    const crew = ko
+      ? [["debugger","원인 분석: 이벤트 핸들러 누락 추적","onLogin에서 click 리스너 미등록 확인"],
+         ["implementer","수정 구현: 리스너 등록 + 비활성 해제","btn.addEventListener('click', submit) 추가"],
+         ["code-reviewer","변경 검토: 회귀/스타일 점검","문제 없음 — 적용 권장"]]
+      : [["debugger","Find root cause: missing handler","onLogin never binds click listener"],
+         ["implementer","Implement fix: bind + enable","added btn.addEventListener('click', submit)"],
+         ["code-reviewer","Review change: regressions/style","Looks good — recommend applying"]];
+    crew.forEach(([nm, desc, result], i) => {
+      setTimeout(() => emit("teammate_update", { agentId: id, name: nm, desc, status: "working" }), 900 + i * 600);
+      setTimeout(() => emit("teammate_update", { agentId: id, name: nm, result, status: "done" }), 2600 + i * 600);
+    });
     setTimeout(() => { a.port = 5173; emit("agent_update", { ...a }); }, 2200);
     setTimeout(() => { a.status = "done"; a.cost = 0.0123; emit("agent_done", { ...a }); }, 800 + sample.length * 600 + 400);
     return Promise.resolve(id);
@@ -192,7 +207,7 @@ let repoPath = localStorage.getItem("cc_repo") || "";
 let checkedOk = false, folderOk = !!repoPath, setupOk = localStorage.getItem("cc_setup") === "1";
 let selectedId = null;          // 현재 선택된 작업(null = 새 작업/컴포저)
 const openTabs = [];            // 열린 탭(작업 id 순서)
-let apiMode = false;
+let authMode = localStorage.getItem("cc_authmode") || "subscription"; // subscription(앱 플랜) | api
 
 function repoBaseName(){
   if (!repoPath) return t("noFolder");
@@ -280,10 +295,19 @@ function enterApp(){
   }).catch(() => { $("#csDot").classList.remove("on"); $("#csPlan").textContent = t("disconnected"); });
   loadAgents();
   invoke("get_cost_cap").then(v => { if (v != null) $("#costCap").value = v; }).catch(()=>{});
-  // 환경에 API 키가 있으면 'API 모드' 표시(키는 저장하지 않음 — 안전 원칙)
-  invoke("check_api_mode").then(on => { apiMode = !!on; $("#apiMode")?.classList.toggle("hidden", !apiMode); }).catch(()=>{});
+  syncTokenSeg();
   showComposer();
 }
+
+// 토큰 소스 세그먼트(구독/API) 동기화 + 전환
+function syncTokenSeg(){
+  document.querySelectorAll("#tokenSeg button").forEach(b => b.classList.toggle("on", b.dataset.mode === authMode));
+}
+$("#tokenSeg").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-mode]"); if (!b) return;
+  authMode = b.dataset.mode; localStorage.setItem("cc_authmode", authMode);
+  syncTokenSeg(); renderStatusStrip();
+});
 
 $("#costCap").addEventListener("change", () => {
   const v = parseFloat($("#costCap").value);
@@ -472,7 +496,7 @@ $("#btnRun").addEventListener("click", async () => {
   const keepgoing = $("#tglKeep").checked;
   const team = $("#tglTeam").checked;
   try {
-    await invoke("create_agent", { repo: repoPath, prompt: promptText, model, permission, branch: null, agent, keepgoing, team });
+    await invoke("create_agent", { repo: repoPath, prompt: promptText, model, permission, branch: null, agent, keepgoing, team, authmode: authMode });
     $("#prompt").value = ""; delete $("#prompt").dataset.perm; delete $("#prompt").dataset.agent;
   } catch (e) { alert(t("runFail") + e); }
 });
@@ -490,12 +514,33 @@ function costTotal(){
   return s;
 }
 
-function renderTeammates(a){
-  const tm = a.teammates;
-  if (!tm || !Object.keys(tm).length) return "";
-  const chips = Object.entries(tm).map(([name, st]) =>
-    `<span class="mate ${st}">${st === "done" ? "✓" : "●"} ${esc(name)}</span>`).join("");
-  return `<div class="mates">${t("mates")} ${chips}</div>`;
+// 팀원 데이터 정규화: {status} 문자열 또는 {status,desc,result} 객체 모두 허용
+function mate(tm, name){ const v = tm[name]; return typeof v === "string" ? { status: v } : (v || {}); }
+
+// 오케스트레이터 → 전문가 호출관계 바
+function renderOrchBar(a){
+  const tm = a.teammates; if (!tm || !Object.keys(tm).length) return "";
+  const chips = Object.keys(tm).map(name => {
+    const m = mate(tm, name);
+    return `<span class="orch-chip ${m.status}">${m.status === "done" ? "✓" : "●"} ${esc(name)}</span>`;
+  }).join('<span class="orch-arrow">·</span>');
+  return `<div class="orch-bar"><span class="orch-lead">🧠 ${t("orchestrator")}</span><span class="orch-to">→</span>${chips}</div>`;
+}
+
+// 서브에이전트 미니 콘솔(CMD 창) 그리드
+function renderSubConsoles(a){
+  const tm = a.teammates; if (!tm || !Object.keys(tm).length) return "";
+  const cards = Object.keys(tm).map(name => {
+    const m = mate(tm, name);
+    const body = m.status === "done"
+      ? (m.result ? esc(m.result) : "✓ " + t("sub_done"))
+      : (m.desc ? esc(m.desc) : t("sub_working"));
+    return `<div class="console sub ${m.status}">
+      <div class="con-head"><span class="con-dot ${m.status}"></span>${esc(name)}<span class="con-st">${m.status === "done" ? "✓ done" : "● working"}</span></div>
+      <div class="con-body">${body}</div>
+    </div>`;
+  }).join("");
+  return `<div class="subs">${cards}</div>`;
 }
 
 function shortId(id){ const m = String(id).match(/\d+/); return m ? m[0] : String(id).slice(-4); }
@@ -535,7 +580,12 @@ function closeTab(id){
   if (selectedId === id) selectedId = openTabs.length ? openTabs[Math.min(i, openTabs.length - 1)] : null;
   render();
 }
-function showComposer(){ selectedId = null; render(); }
+function showComposer(opts){
+  selectedId = null;
+  if (opts && opts.reset){ const p = $("#prompt"); if (p){ p.value = ""; delete p.dataset.perm; delete p.dataset.agent; } }
+  render();
+  const p = $("#prompt"); if (p) { try { p.focus(); } catch(_){} }
+}
 
 // ---------- 렌더 ----------
 function render(){
@@ -552,7 +602,7 @@ function renderStatusStrip(){
   const cap = parseFloat($("#costCap")?.value);
   $("#costTotal").classList.toggle("warn", !isNaN(cap) && cap > 0 && total >= cap * 0.8);
   const running = [...state.values()].filter(a => a.status === "running" || a.status === "creating").length;
-  $("#apiHint")?.classList.toggle("hidden", running < 3 || apiMode); // API 모드면 한도 걱정 불필요
+  $("#apiHint")?.classList.toggle("hidden", running < 3 || authMode === "api"); // API면 구독 한도 걱정 불필요
 }
 
 function renderSidebar(){
@@ -608,19 +658,25 @@ function renderAgentView(a){
   const av = $("#agentView");
   const sp = speech(a);
   const logHtml = (a.output || []).map(markTool).join("\n");
+  const hasTeam = a.teammates && Object.keys(a.teammates).length;
   av.innerHTML =
     `<div class="char-strip">
        <div class="cc-char ${a.status}"><div class="cc-body"></div></div>
        <div class="speech">${esc(sp.msg)}${sp.sub ? `<span class="sub">${esc(sp.sub)}</span>` : ""}</div>
+       <div class="av-meta">
+         <span class="av-model">${esc(a.branch || a.id)}</span>
+         ${a.model ? `<span>· ${esc(a.model)}</span>` : ""}
+         ${a.cost != null ? `<span class="av-cost">$${Number(a.cost).toFixed(4)}</span>` : ""}
+       </div>
      </div>
-     <div class="av-head">
-       <span class="av-model">${esc(a.branch || a.id)}</span>
-       <span>· ${t("status_" + a.status) || a.status}</span>
-       ${a.model ? `<span>· ${esc(a.model)}</span>` : ""}
-       ${a.cost != null ? `<span class="av-cost">$${Number(a.cost).toFixed(4)}</span>` : ""}
+     ${renderOrchBar(a)}
+     <div class="console-area">
+       <div class="console main">
+         <div class="con-head"><span class="con-dot ${a.status}"></span>${hasTeam ? t("orchestrator") : t("agentConsole")}<span class="con-st">${t("status_" + a.status) || a.status}</span></div>
+         <div class="con-body term" id="term-${a.id}">${logHtml || `<span style="color:var(--faint)">${esc(t("termWaiting"))}</span>`}</div>
+       </div>
+       ${renderSubConsoles(a)}
      </div>
-     ${renderTeammates(a)}
-     <div class="term" id="term-${a.id}">${logHtml || `<span style="color:var(--faint)">${esc(t("termWaiting"))}</span>`}</div>
      <div class="av-acts">
        ${a.port ? `<button data-act="preview" class="primary">${t("preview", a.port)}</button>` : ""}
        <button data-act="apply" class="primary">${t("avApply")}</button>
@@ -665,10 +721,10 @@ function renderGit(){
 $("#wsList").addEventListener("click", (e) => { const row = e.target.closest(".ws-item"); if (row) selectAgent(row.dataset.id); });
 $("#agentTabs").addEventListener("click", (e) => {
   const x = e.target.closest("[data-x]"); if (x){ e.stopPropagation(); closeTab(x.dataset.x); return; }
-  if (e.target.closest(".atab.new")){ showComposer(); return; }
+  if (e.target.closest(".atab.new")){ showComposer({ reset: true }); return; }
   const tab = e.target.closest(".atab"); if (tab && tab.dataset.id) selectAgent(tab.dataset.id);
 });
-$("#btnNew").addEventListener("click", showComposer);
+$("#btnNew").addEventListener("click", () => showComposer({ reset: true }));
 
 // ---------- 적용하기(변경 저장) ----------
 async function applyChanges(id){
@@ -766,11 +822,13 @@ listen("agent_removed", (ev) => {
   render();
 });
 listen("teammate_update", (ev) => {
-  const { agentId, name, status } = ev.payload || {};
+  const { agentId, name, status, desc, result } = ev.payload || {};
   const a = state.get(agentId); if (!a) return;
   a.teammates = a.teammates || {};
-  a.teammates[name] = status;
-  render();
+  const prev = mate(a.teammates, name);
+  a.teammates[name] = { status, desc: desc || prev.desc || "", result: result || prev.result || "" };
+  // 보고 있는 작업이면 서브 콘솔만 갱신(메인 터미널 스크롤 보존)
+  if (agentId === selectedId) renderStage(); else renderSidebar();
 });
 listen("cost_capped", (ev) => {
   const { total, cap } = ev.payload || {};

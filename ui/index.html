@@ -64,8 +64,14 @@
         <span class="cs-sep">·</span>
         <label class="capctl" data-i18n-title="capTitle" title="이번 세션 비용이 이 금액에 닿으면 진행 중인 작업을 자동으로 멈춰요"><span data-i18n="cap">상한 $</span><input id="costCap" type="number" min="0" step="0.5" value="5" /></label>
       </div>
+      <div class="cs-token" data-i18n-title="tokenTitle" title="어떤 토큰으로 청구할지 — 구독(앱 플랜) 또는 API 키">
+        <span class="cs-tlabel" data-i18n="tokenSrc">토큰</span>
+        <div class="seg" id="tokenSeg">
+          <button type="button" data-mode="subscription" class="on" data-i18n="tokenSub">구독 플랜</button>
+          <button type="button" data-mode="api" data-i18n="tokenApi">API 키</button>
+        </div>
+      </div>
       <span id="apiHint" class="api-hint hidden" data-i18n-title="apiHintTitle" data-i18n="apiHint" title="여러 작업을 동시에 돌리면 구독 한도를 빨리 써요">⚡ 많이 쓰는 중 — API 키 연결을 권해요</span>
-      <span id="apiMode" class="api-mode hidden" data-i18n-title="apiModeTitle" data-i18n="apiMode" title="환경에 API 키가 설정되어 API 경로로 동작 중이에요">✓ API 모드</span>
     </div>
 
     <div class="repo-group">
@@ -89,6 +95,9 @@
     <div class="stage">
       <section class="agent-view hidden" id="agentView"></section>
       <section class="composer" id="composerView">
+    <p class="composer-hint" data-i18n="composerHint">무엇을 원하는지 적기만 하면, 알아서 전문가와 스킬을 골라 처리해요. (아래 템플릿은 선택)</p>
+    <details class="quick-tpl">
+      <summary data-i18n="quickTpl">빠른 템플릿 (선택)</summary>
     <div class="recipes">
       <button class="recipe" data-r="bug" data-i18n="r_bug">🐞 버그 고치기</button>
       <button class="recipe" data-r="feature" data-i18n="r_feature">✨ 기능 추가</button>
@@ -105,6 +114,7 @@
       <button class="linkbtn" id="recipeExport" data-i18n-title="exportTitle" title="레시피 묶음을 파일로 내보내요" data-i18n="recipeExport">↧ 레시피 내보내기</button>
       <button class="linkbtn" id="recipeImport" data-i18n-title="importTitle" title="공유받은 레시피 묶음(JSON)을 추가해요" data-i18n="recipeImport">↥ 레시피 가져오기</button>
     </div>
+    </details>
     <textarea id="prompt" data-i18n-ph="promptPh" placeholder="무엇을 부탁할까요? 예) 로그인 버튼이 안 눌려요. 고쳐주세요."></textarea>
     <div class="controls">
       <label><span data-i18n="speedLabel">꼼꼼함</span>

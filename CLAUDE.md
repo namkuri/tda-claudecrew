@@ -87,6 +87,11 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **중앙**: 에이전트별 **터미널 탭**(상태점·닫기) + "＋새 작업"(컴포저). 선택 작업은 **Claude 캐릭터(코랄 `--claude`, 상태별 색/바운스) + 말풍선**("저 작업 끝냈어요!" 등)으로 직관 표시 + 팀원 칩·터미널 로그·액션.
   - **우 Git 패널**: 기준 main, 커밋 메시지+커밋(commit_agent), "main 대비 변경" 파일 목록(±, 클릭 시 거시→미시 diff 모달).
   - 사이드바 ± 통계는 `ensureStat`로 get_diff 1회 캐싱. 새 작업 생성 시 자동 탭 오픈. 데모 검증 완료.
+- **사용성 개선(v0.8)**:
+  - **토큰 소스 선택(구독/API)**: 사이드바 세그 토글. 구독(앱 플랜) 선택 시 `run_agent`가 자식 프로세스에서 `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`을 **제거** → Claude Code가 로그인된 구독(Claude Max 등)으로 청구. 키는 저장하지 않음(안전).
+  - **자동 오케스트레이션 기본**: 레시피 없이 그냥 적으면 `create_agent`가 "오케스트레이터가 전문가·스킬을 스스로 고르고, 없으면 스킬을 만들어 진행" 프롬프트를 주입. 레시피는 접이식 "빠른 템플릿(선택)"으로 강등.
+  - **멀티 CMD 콘솔**: 에이전트 뷰 = **오케스트레이터 터미널(메인) + 서브에이전트별 미니 콘솔(설명→결과) + 호출관계 바**. `process_teammates`가 Task tool_use/result에서 설명·결과 스니펫을 추출해 `teammate_update`로 전달.
+  - "+새 작업" 수정(컴포저 복귀+프롬프트 초기화+포커스).
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.

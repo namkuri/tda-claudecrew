@@ -223,3 +223,47 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .gp-add{color:#7ee787} .gp-del{color:#ff7b72}
 
 @media(max-width:1100px){ #app{grid-template-columns:220px 1fr} .gitpanel{display:none} }
+
+/* ===== v0.8: 토큰 세그 · 자동 오케 컴포저 · 멀티 콘솔 ===== */
+.cs-token{display:flex;align-items:center;gap:8px;margin-top:9px;font-size:11px;color:var(--dim)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{background:transparent;border:none;color:var(--dim);font-family:var(--font);font-size:11px;padding:4px 11px;cursor:pointer}
+.seg button.on{background:var(--accent);color:#06231d;font-weight:700}
+
+.composer-hint{margin:0 0 14px;color:var(--dim);font-size:13px;line-height:1.55}
+.quick-tpl{margin-bottom:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+.quick-tpl>summary{cursor:pointer;padding:9px 12px;font-size:12px;color:var(--dim);list-style:none;outline:none}
+.quick-tpl>summary::-webkit-details-marker{display:none}
+.quick-tpl>summary::before{content:"▸ ";color:var(--faint)}
+.quick-tpl[open]>summary::before{content:"▾ "}
+.quick-tpl .recipes{padding:8px 12px 0;margin:0}
+.quick-tpl .recipe-tools{padding:8px 12px 12px;margin:0}
+
+.av-meta{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--dim);display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.av-meta .av-model{color:var(--ink)} .av-meta .av-cost{color:var(--accent)}
+
+/* 오케스트레이터 → 전문가 호출 바 */
+.orch-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-size:12px}
+.orch-lead{color:var(--claude);font-weight:700}
+.orch-to,.orch-arrow{color:var(--faint)}
+.orch-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--dim);font-family:var(--mono);font-size:11px}
+.orch-chip.working{color:var(--run);border-color:var(--run)}
+.orch-chip.done{color:var(--done);border-color:var(--accent-d)}
+
+/* 멀티 CMD 콘솔 */
+.console-area{flex:1;min-height:0;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:12px}
+.console{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#0b0e11;display:flex;flex-direction:column}
+.console.main{flex:none;min-height:220px}
+.con-head{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--panel2);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--ink)}
+.con-dot{width:8px;height:8px;border-radius:50%;background:var(--stop);flex:none}
+.con-dot.running,.con-dot.working{background:var(--run);animation:pulse 1.2s infinite}
+.con-dot.done{background:var(--done)} .con-dot.creating{background:var(--idle)} .con-dot.error{background:var(--err)} .con-dot.committed{background:var(--accent)}
+.con-st{margin-left:auto;color:var(--faint);font-size:10px}
+.con-body{padding:12px 14px;font-family:var(--mono);font-size:12.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:#cdd8df;overflow:auto}
+.con-body.term{flex:1;min-height:130px}
+.con-body .tool{color:var(--accent)}
+.subs{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.console.sub{min-height:120px}
+.console.sub .con-body{flex:1;color:#aebac4;font-size:12px;min-height:64px}
+.console.sub.working{border-color:var(--run)}
+.console.sub.done{border-color:var(--accent-d)}
