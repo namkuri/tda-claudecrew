@@ -75,6 +75,8 @@ const I18N = {
     verify: "🧪 자동 검증", verifying: "검증 중…", verifyPass: "검증 통과", verifyFail: "검증 실패",
     verifySkipped: "감지된 빌드 시스템 없음(검증 생략)", verifyFailedTip: "검증 실패 — 그래도 적용하시려면 다시 누르세요.",
     sub_failed: "서브에이전트 실패",
+    noDiagInfo: "에이전트가 진단 정보 없이 종료됐어요.",
+    noDiagHints: "흔한 원인: (1) Claude Code 로그인 만료 — 터미널에서 `claude` 한 번 실행해 확인  (2) 명령행 인자가 너무 김(Windows 8191자 한도)  (3) PATH에서 claude 못 찾음",
     tokenSrc: "토큰", tokenSub: "구독 플랜", tokenApi: "API 키", tokenTitle: "어떤 토큰으로 청구할지 — 구독(앱 플랜) 또는 API 키",
     composerHint: "무엇을 원하는지 적기만 하면, 알아서 전문가와 스킬을 골라 처리해요. (아래 템플릿은 선택)",
     quickTpl: "빠른 템플릿 (선택)",
@@ -144,6 +146,8 @@ const I18N = {
     verify: "🧪 Auto-verify", verifying: "Verifying…", verifyPass: "Verified", verifyFail: "Verification failed",
     verifySkipped: "No detected build system (skipped)", verifyFailedTip: "Verification failed — press Apply again to override.",
     sub_failed: "Sub-agent failed",
+    noDiagInfo: "Agent exited without diagnostic output.",
+    noDiagHints: "Common causes: (1) Claude Code login expired — run `claude` once in a terminal  (2) Argv too long (Windows 8191-char limit)  (3) `claude` not on PATH",
     tokenSrc: "Tokens", tokenSub: "Subscription", tokenApi: "API key", tokenTitle: "Which tokens to bill — your subscription (app plan) or an API key",
     composerHint: "Just write what you want — it picks the right experts and skills for you. (Templates below are optional.)",
     quickTpl: "Quick templates (optional)",
@@ -811,7 +815,13 @@ function renderAgentView(a){
      <div class="console-area">
        <div class="console main">
          <div class="con-head"><span class="con-dot ${a.status}"></span>${hasTeam ? t("orchestrator") : t("agentConsole")}<span class="con-st">${t("status_" + a.status) || a.status}</span></div>
-         <div class="con-body term" id="term-${a.id}">${logHtml || `<span style="color:var(--faint)">${esc(t("termWaiting"))}</span>`}</div>
+         <div class="con-body term" id="term-${a.id}">${
+           logHtml
+             ? logHtml
+             : (a.status === "error"
+                 ? `<span style="color:var(--err)">❌ ${esc(t("noDiagInfo"))}</span>\n<span style="color:var(--dim)">${esc(t("noDiagHints"))}</span>`
+                 : `<span style="color:var(--faint)">${esc(t("termWaiting"))}</span>`)
+         }</div>
        </div>
        ${renderSubConsoles(a)}
      </div>

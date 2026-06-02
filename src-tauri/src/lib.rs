@@ -79,14 +79,51 @@ fn hide_window(cmd: &mut Command) {
 #[cfg(not(windows))]
 fn hide_window(_cmd: &mut Command) {}
 
-// Windows에서는 .cmd 실행을 위해 cmd /C 래퍼가 필요하다.
+// Windows에선 PATH에서 claude.cmd/.bat/.exe를 찾아 **직접** 실행한다.
+// (이전엔 `cmd /C claude ...` 로 래핑했는데, cmd 의 8191자 명령행 한도에 걸리거나
+// 인자 이스케이핑이 깨질 수 있어 큰 시스템 프롬프트/긴 인자에서 무음 실패가 발생.)
+#[cfg(windows)]
+fn resolve_claude_exe() -> Option<std::path::PathBuf> {
+    use std::env;
+    // 1) where 결과 첫 줄
+    if let Ok(out) = std::process::Command::new("where").arg("claude").output() {
+        if out.status.success() {
+            if let Some(line) = String::from_utf8_lossy(&out.stdout).lines().next() {
+                let p = std::path::PathBuf::from(line.trim());
+                if p.exists() { return Some(p); }
+            }
+        }
+    }
+    // 2) PATH 직접 탐색(확장자: cmd, exe, bat)
+    if let Ok(path) = env::var("PATH") {
+        for dir in env::split_paths(&path) {
+            for ext in ["cmd", "exe", "bat"] {
+                let cand = dir.join(format!("claude.{ext}"));
+                if cand.exists() { return Some(cand); }
+            }
+        }
+    }
+    None
+}
+
 fn claude_command(args: &[String]) -> Command {
-    let mut c = if cfg!(windows) {
-        let mut c = Command::new("cmd");
-        c.arg("/C").arg("claude");
-        for a in args { c.arg(a); }
-        c
-    } else {
+    #[cfg(windows)]
+    let mut c = match resolve_claude_exe() {
+        Some(p) => {
+            let mut c = Command::new(p);
+            for a in args { c.arg(a); }
+            c
+        }
+        None => {
+            // PATH에서 못 찾으면 마지막 폴백으로 cmd /C (이전 동작)
+            let mut c = Command::new("cmd");
+            c.arg("/C").arg("claude");
+            for a in args { c.arg(a); }
+            c
+        }
+    };
+    #[cfg(not(windows))]
+    let mut c = {
         let mut c = Command::new("claude");
         for a in args { c.arg(a); }
         c
@@ -588,10 +625,17 @@ fn run_agent(
     if let Some(sid) = resume_sid.as_deref() {
         if !sid.is_empty() { args.push("--resume".into()); args.push(sid.into()); }
     } else {
-        // 첫 호출에만 프로젝트 컨텍스트(CLAUDE.md/AGENTS.md/README) 시스템 프롬프트로 주입
+        // 첫 호출에만 프로젝트 컨텍스트(CLAUDE.md/AGENTS.md/README)를 시스템 프롬프트로 주입.
+        // ⚠ 큰 텍스트를 --append-system-prompt 인자로 직접 주면 Windows cmd /C 의 8191자 명령행
+        // 한도에 걸려 claude 가 즉시 종료된다. 파일로 전달(--append-system-prompt-file)해서 회피.
         if let Some(ctx) = build_context_prompt(&repo) {
-            args.push("--append-system-prompt".into());
-            args.push(ctx);
+            let ctx_path = PathBuf::from(&worktree).join(".cc-system-prompt.md");
+            if let Err(e) = std::fs::write(&ctx_path, &ctx) {
+                emit_output(&app, &id, &format!("[알림] 시스템 프롬프트 파일 쓰기 실패: {e} (컨텍스트 주입 건너뜀)"));
+            } else {
+                args.push("--append-system-prompt-file".into());
+                args.push(ctx_path.to_string_lossy().to_string());
+            }
         }
     }
     let mut cmd = claude_command(&args);
@@ -609,10 +653,20 @@ fn run_agent(
         cmd.env_remove("ANTHROPIC_AUTH_TOKEN");
     }
 
+    // 진단용: 어떤 옵션으로 호출했는지 한 줄로 남긴다(긴 인자값은 길이만 표시).
+    {
+        let summary: Vec<String> = args.iter().map(|a| {
+            if a.len() > 80 { format!("<{}자>", a.chars().count()) } else { a.clone() }
+        }).collect();
+        let total: usize = args.iter().map(|a| a.len() + 1).sum();
+        emit_output(&app, &id, &format!("$ claude {} (총 인자 {}자)", summary.join(" "), total));
+    }
+
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            emit_output(&app, &id, &format!("[claude 실행 실패] {e} — 설치/로그인을 확인하세요."));
+            emit_output(&app, &id, &format!("[claude 실행 실패] {e}"));
+            emit_output(&app, &id, "→ 확인: ① `claude --version` 동작 여부 ② PATH 등록 ③ Windows이면 cmd /C 래퍼가 인자 길이(8191자)를 초과하지 않는지");
             set_status(&app, &id, "error");
             return;
         }
@@ -719,14 +773,32 @@ fn run_agent(
         }
     }
 
-    let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+    let exit = child.wait().ok();
+    let ok = exit.as_ref().map(|s| s.success()).unwrap_or(false);
+    let exit_code = exit.as_ref().and_then(|s| s.code());
+
+    // 진단: 실패했는데 의미 있는 출력이 거의 없으면 사용자에게 친화 메시지로 안내
+    {
+        let state = app.state::<AppState>();
+        let useful_lines = state.agents.lock().unwrap().get(&id)
+            .map(|a| a.output.iter().filter(|l| !l.starts_with("$ claude ") && !l.starts_with("[알림]")).count())
+            .unwrap_or(0);
+        if !ok && useful_lines == 0 {
+            let code = exit_code.map(|c| c.to_string()).unwrap_or_else(|| "?".into());
+            emit_output(&app, &id, &format!("❌ claude 프로세스가 출력 없이 종료(exit {code})."));
+            emit_output(&app, &id, "→ 흔한 원인: (1) Windows cmd /C 명령행 한도(8191자) 초과 — CLAUDE.md/README 가 크면 발생. (2) 로그인 만료 — `claude` 한 번 직접 실행해 확인. (3) 잘못된 인자.");
+        } else if !ok {
+            let code = exit_code.map(|c| c.to_string()).unwrap_or_else(|| "?".into());
+            emit_output(&app, &id, &format!("(claude 종료 코드: {code})"));
+        }
+    }
+
     set_status(&app, &id, if ok { "done" } else { "error" });
-    // done 이벤트(비용 포함) — 가드를 명명해 state보다 먼저 drop되게 한다
     let state = app.state::<AppState>();
     let agents = state.agents.lock().unwrap();
     if let Some(a) = agents.get(&id) {
         let _ = app.emit("agent_done", a.clone());
-        save_agent_state(a); // 마지막 상태(비용/토큰/세션ID/output)까지 영속화
+        save_agent_state(a);
     }
 }
 
