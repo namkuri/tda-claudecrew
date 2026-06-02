@@ -95,6 +95,20 @@
 
 ---
 
+## 마일스톤 v0.4 — "oMo 수준 에이전트/스킬 관리" ✅ 완료 (oh-my-openagent 벤치마킹)
+> code-yeongyu/oh-my-openagent의 hyperplan·멀티파일 스킬·슬래시 커맨드·전문 워크플로 수준으로 이식.
+
+- [x] **전문가 7종**: +`plan`(계획 형식화가, opus/high), +`security`(보안 감사가).
+- [x] **hyperplan 스킬**(시그니처): 5 적대 멤버(skeptic/validator/researcher/architect/creative) Task 병렬 → 라운드1 독립분석 → 라운드2 교차공격 → 라운드3 방어/정제/철회 → 통찰 증류 → `plan` 위임. 데모 검증.
+- [x] **워크플로 스킬 3종**: security-research(+`scripts/scan-secrets.{sh,ps1}` 멀티파일 패턴), remove-deadcode, pre-publish-review(다중 관점 게이트).
+- [x] **슬래시 커맨드 4종**: `/hyperplan /security-research /remove-deadcode /review` → `~/.claude/commands/`.
+- [x] **설치 확장**: `setup_environment`가 agents 7 + skills 10(+멀티파일) + commands 4 설치.
+- [x] **UI 레시피 8종**: +🧠 계획 세우기(hyperplan, opus/plan모드), +🛡️ 보안 점검(security 전문가).
+
+**다음 후보(omo 추가 격차)**: github-triage(스크립트 포함) 스킬, work-with-pr 워크플로, pre-publish-review를 실제 N-에이전트 병렬로 확장, 스킬 eval/벤치마크, AGENTS.md 거버넌스 문서.
+
+---
+
 ## 마일스톤 v1 — "팀 오케스트레이션 + 단일 설치형 앱"
 
 ### [~] V1.1 실제 에이전트 팀 오케스트레이션 (기초 완료, 심화 남음)

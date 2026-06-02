@@ -176,12 +176,14 @@ fn setup_environment() -> Result<String, String> {
     .map_err(|e| e.to_string())?;
 
     // 전문가 설치
-    let agents: [(&str, &str); 5] = [
+    let agents: [(&str, &str); 7] = [
         ("oracle.md", include_str!("../agents/oracle.md")),
         ("librarian.md", include_str!("../agents/librarian.md")),
         ("implementer.md", include_str!("../agents/implementer.md")),
         ("debugger.md", include_str!("../agents/debugger.md")),
         ("code-reviewer.md", include_str!("../agents/code-reviewer.md")),
+        ("plan.md", include_str!("../agents/plan.md")),
+        ("security.md", include_str!("../agents/security.md")),
     ];
     for (name, body) in agents {
         std::fs::write(agents_dir.join(name), body).map_err(|e| e.to_string())?;
@@ -189,13 +191,17 @@ fn setup_environment() -> Result<String, String> {
 
     // 스킬 설치 (~/.claude/skills/<name>/SKILL.md)
     let skills_dir = claude_dir.join("skills");
-    let skills: [(&str, &str); 6] = [
+    let skills: [(&str, &str); 10] = [
         ("git-master", include_str!("../skills/git-master/SKILL.md")),
         ("test-writer", include_str!("../skills/test-writer/SKILL.md")),
         ("frontend-ui", include_str!("../skills/frontend-ui/SKILL.md")),
         ("browser-test", include_str!("../skills/browser-test/SKILL.md")),
         ("doc-writer", include_str!("../skills/doc-writer/SKILL.md")),
         ("init-deep", include_str!("../skills/init-deep/SKILL.md")),
+        ("hyperplan", include_str!("../skills/hyperplan/SKILL.md")),
+        ("security-research", include_str!("../skills/security-research/SKILL.md")),
+        ("remove-deadcode", include_str!("../skills/remove-deadcode/SKILL.md")),
+        ("pre-publish-review", include_str!("../skills/pre-publish-review/SKILL.md")),
     ];
     for (name, body) in skills {
         let dir = skills_dir.join(name);
@@ -203,7 +209,42 @@ fn setup_environment() -> Result<String, String> {
         std::fs::write(dir.join("SKILL.md"), body).map_err(|e| e.to_string())?;
     }
 
-    Ok("준비 완료: 전문가 5종 + 스킬 6종 설치 + 팀 기능 활성화 + 안전/품질 훅 설치".into())
+    // 멀티파일 스킬: security-research 보조 스크립트(scripts/)
+    let sr_scripts = skills_dir.join("security-research").join("scripts");
+    std::fs::create_dir_all(&sr_scripts).map_err(|e| e.to_string())?;
+    std::fs::write(
+        sr_scripts.join("scan-secrets.sh"),
+        include_str!("../skills/security-research/scripts/scan-secrets.sh"),
+    )
+    .map_err(|e| e.to_string())?;
+    {
+        let mut bytes = vec![0xEF, 0xBB, 0xBF]; // .ps1 BOM
+        bytes.extend_from_slice(include_str!("../skills/security-research/scripts/scan-secrets.ps1").as_bytes());
+        std::fs::write(sr_scripts.join("scan-secrets.ps1"), bytes).map_err(|e| e.to_string())?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(
+            sr_scripts.join("scan-secrets.sh"),
+            std::fs::Permissions::from_mode(0o755),
+        );
+    }
+
+    // 슬래시 커맨드 설치 (~/.claude/commands/<name>.md)
+    let commands_dir = claude_dir.join("commands");
+    std::fs::create_dir_all(&commands_dir).map_err(|e| e.to_string())?;
+    let commands: [(&str, &str); 4] = [
+        ("hyperplan.md", include_str!("../commands/hyperplan.md")),
+        ("security-research.md", include_str!("../commands/security-research.md")),
+        ("remove-deadcode.md", include_str!("../commands/remove-deadcode.md")),
+        ("review.md", include_str!("../commands/review.md")),
+    ];
+    for (name, body) in commands {
+        std::fs::write(commands_dir.join(name), body).map_err(|e| e.to_string())?;
+    }
+
+    Ok("준비 완료: 전문가 7종 + 스킬 10종 + 커맨드 4종 설치 + 팀 기능 + 안전/품질 훅".into())
 }
 
 // ~/.claude/claudecrew-hooks 에 OS별 훅 스크립트(두 벌)를 기록하고,

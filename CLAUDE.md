@@ -36,7 +36,8 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
 - `src-tauri/src/main.rs` — 진입점(`claudecrew_lib::run()`)
 - `src-tauri/agents/*.md` — 전문가 정의(컴파일 시 `include_str!`로 포함, `setup_environment`가 `~/.claude/agents/`에 기록)
 - `src-tauri/hooks/*.{ps1,sh}` — 안전/품질 훅 스크립트(OS 두 벌, `include_str!`로 포함, `~/.claude/claudecrew-hooks/`에 기록)
-- `src-tauri/skills/<name>/SKILL.md` — 기본 스킬(`include_str!`로 포함, `~/.claude/skills/`에 기록)
+- `src-tauri/skills/<name>/SKILL.md` — 스킬 10종(멀티파일: security-research/scripts/ 포함). `~/.claude/skills/`에 기록
+- `src-tauri/commands/*.md` — 슬래시 커맨드(hyperplan/security-research/remove-deadcode/review). `~/.claude/commands/`에 기록
 - `.github/workflows/{build,pages}.yml` — 클라우드 빌드(제어 정책 우회) + Pages 데모 배포
 - `docs/SETUP-GUIDE.md` — **사용자가 직접 할 일**(git init·push, Pages/Actions 켜기, 설치파일 내려받기)
 - `docs/RUN-AND-TEST.md` — **데스크톱 앱 실행·기능별 테스트 시나리오**(온보딩~미리보기·팀·검색·복원까지)
@@ -61,6 +62,11 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
 - **팀 병렬 시각화**: `run_agent`가 Task(서브에이전트) tool_use/tool_result 추적 → `teammate_update` 이벤트 → 카드에 전문가별 ●/✓ 칩.
 - **Exa 웹검색 키**: `set_exa_key(repo,key)` → `.mcp.json`에 exa 서버(env EXA_API_KEY, 사용자 본인 키). UI "웹검색 키" 버튼. `.mcp.json`은 .gitignore.
 - **작업 공간 복원(V1.3)**: `restore_agents(repo)` — `git worktree list`로 `.agentboard/` 작업 복원. 시작 시 호출.
+- **omo 수준 AI 관리(v0.4)**: 전문가 **7종**(+plan 계획가, +security 보안가), 스킬 **10종**, 슬래시 커맨드 **4종**.
+  - **hyperplan 스킬**: 적대적 다중 에이전트 계획(5 관점 비판자 Task 병렬 소환 → 3라운드 교차비평 → 증류 → plan 위임). omo 시그니처 이식.
+  - 워크플로 스킬: **security-research**(+scripts/scan-secrets {sh,ps1} 멀티파일), **remove-deadcode**, **pre-publish-review**(다중 관점 게이트).
+  - 커맨드: `/hyperplan /security-research /remove-deadcode /review` → `~/.claude/commands/`.
+  - UI 레시피 **8종**(+🧠 계획 세우기[hyperplan], +🛡️ 보안 점검).
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.

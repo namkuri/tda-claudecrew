@@ -66,6 +66,8 @@ const RECIPES = {
   test:    { speed: "sonnet", perm: "acceptEdits", agent: "implementer",   text: "다음 대상에 대한 테스트를 만들고 실행해주세요: " },
   cleanup: { speed: "sonnet", perm: "acceptEdits", agent: "implementer",   text: "다음을 안전한 범위에서 정리·리팩터링해주세요(동작은 그대로): " },
   review:  { speed: "sonnet", perm: "plan",        agent: "code-reviewer", text: "다음 코드/변경을 검토하고 개선점을 알려주세요: " },
+  plan:    { speed: "opus",   perm: "plan",        agent: null,            text: "다음 작업을 hyperplan(적대적 다중 에이전트 계획)으로 계획 세워주세요: " },
+  security:{ speed: "sonnet", perm: "plan",        agent: "security",      text: "다음을 security-research 스킬로 보안 점검해주세요(보고만, 파일 미수정): " },
 };
 
 function esc(s){return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}

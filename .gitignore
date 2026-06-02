@@ -12,6 +12,6 @@ Thumbs.db
 # logs
 *.log
 
-# MCP config may contain user API keys (Exa 등) — 올리지 않음
-.mcp.json
+# MCP config may contain user API keys (Exa 등) — 올리지 않음 (루트만; 플러그인 템플릿은 유지)
+/.mcp.json
 .agentboard/
