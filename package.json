@@ -1,6 +1,6 @@
 {
   "name": "claudecrew",
-  "version": "0.9.5",
+  "version": "0.9.6",
   "private": true,
   "description": "누구나 쓰는 Claude 에이전트 오케스트레이션 데스크톱 앱 (Tauri)",
   "scripts": {

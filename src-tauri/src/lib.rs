@@ -32,6 +32,7 @@ struct AgentInfo {
     #[serde(default)] session_id: Option<String>,
     #[serde(default)] role: Option<String>,
     #[serde(default)] output: Vec<String>,   // 누적 터미널 로그(디스크 영속화)
+    #[serde(default)] started_at: Option<i64>, // 작업 시작(ms epoch) — 헤더 경과시간 표시용
 }
 
 struct AppState {
@@ -164,16 +165,73 @@ fn git(repo: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
-// stream-json 이벤트에서 사람이 읽을 텍스트만 추출
+// stream-json 의 tool_use input 을 도구별로 사람이 읽기 쉬운 한 줄로.
+// 인터랙티브 claude 가 보여주는 '$ ls -la …', 'Reading 1 file', '🔍 **/*.ts' 같은 정보를
+// 거의 동등하게 노출한다.
+fn fmt_tool_use(name: &str, input: &Value) -> String {
+    let get = |k: &str| -> Option<String> {
+        input.get(k).and_then(|v| v.as_str()).map(|s| s.to_string())
+    };
+    let short = |s: String| -> String {
+        // 너무 긴 명령/패스는 잘라서 보기 좋게
+        if s.chars().count() > 220 {
+            let head: String = s.chars().take(200).collect();
+            format!("{head}…")
+        } else { s }
+    };
+    let detail = match name {
+        "Bash" | "PowerShell" => get("command").map(|c| format!("$ {c}")),
+        "Read"  => get("file_path").map(|p| format!("📖 {p}")),
+        "Write" => get("file_path").map(|p| format!("✍️ {p}")),
+        "Edit"  => get("file_path").map(|p| format!("✏️ {p}")),
+        "NotebookEdit" => get("notebook_path").map(|p| format!("📓 {p}")),
+        "Glob"  => get("pattern").map(|p| format!("🔍 {p}")),
+        "Grep"  => {
+            let pat = get("pattern").unwrap_or_default();
+            let extra: Vec<String> = ["glob","path","type"].iter()
+                .filter_map(|k| get(k).map(|v| format!("{k}={v}"))).collect();
+            Some(if extra.is_empty() { format!("🔎 {pat}") } else { format!("🔎 {pat}  ({})", extra.join(", ")) })
+        }
+        "WebFetch"  => get("url").map(|u| format!("🌐 {u}")),
+        "WebSearch" => get("query").map(|q| format!("🌐 \"{q}\"")),
+        "Task"      => {
+            let sub = get("subagent_type").unwrap_or_default();
+            let desc = get("description").unwrap_or_default();
+            Some(format!("🧑‍💼 → {sub}  ({desc})"))
+        }
+        "TodoWrite" => Some("🗒 todo 갱신".into()),
+        _ => None,
+    };
+    match detail {
+        Some(d) => format!("🔧 {name}  {}", short(d)),
+        None => format!("🔧 {name}"),
+    }
+}
+
+// tool_result 내용을 줄 수가 적게 한 덩어리로(상위 결과만 보여줘 잡음 줄임)
+fn fmt_tool_result(content: &Value) -> Option<String> {
+    let text = if let Some(s) = content.as_str() { s.to_string() }
+    else if let Some(arr) = content.as_array() {
+        arr.iter().filter_map(|x| x.get("text").and_then(|t| t.as_str()))
+            .collect::<Vec<_>>().join("\n")
+    } else { return None; };
+    let trimmed = text.trim();
+    if trimmed.is_empty() { return None; }
+    // 첫 5줄만(or 400자) — 그 이상은 잡음
+    let head: String = trimmed.lines().take(5).collect::<Vec<_>>().join("\n");
+    let head = if head.chars().count() > 400 { let h: String = head.chars().take(400).collect(); format!("{h}…") } else { head };
+    Some(format!("  ↳ {head}"))
+}
+
+// stream-json 이벤트에서 사람이 읽을 텍스트 추출(도구 input/결과 포함)
 fn extract_text(evt: &Value) -> Option<String> {
     let t = evt.get("type")?.as_str()?;
     match t {
         "system" => {
             if evt.get("subtype").and_then(|v| v.as_str()) == Some("init") {
-                Some("▶ 세션 시작".into())
-            } else {
-                None
-            }
+                let model = evt.get("model").and_then(|v| v.as_str()).unwrap_or("");
+                Some(if model.is_empty() { "▶ 세션 시작".into() } else { format!("▶ 세션 시작 · {model}") })
+            } else { None }
         }
         "assistant" => {
             let content = evt.get("message")?.get("content")?.as_array()?;
@@ -182,14 +240,37 @@ fn extract_text(evt: &Value) -> Option<String> {
                 match b.get("type").and_then(|v| v.as_str()) {
                     Some("text") => {
                         if let Some(s) = b.get("text").and_then(|v| v.as_str()) {
-                            parts.push(s.to_string());
+                            if !s.trim().is_empty() { parts.push(s.to_string()); }
+                        }
+                    }
+                    Some("thinking") => {
+                        // 추론(생각) 내용은 너무 길어 한 줄로 축약
+                        if let Some(s) = b.get("thinking").and_then(|v| v.as_str()) {
+                            let one: String = s.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(180).collect();
+                            if !one.is_empty() { parts.push(format!("💭 {one}…")); }
                         }
                     }
                     Some("tool_use") => {
                         let name = b.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
-                        parts.push(format!("🔧 {name}"));
+                        let empty = Value::Object(Default::default());
+                        let input = b.get("input").unwrap_or(&empty);
+                        parts.push(fmt_tool_use(name, input));
                     }
                     _ => {}
+                }
+            }
+            if parts.is_empty() { None } else { Some(parts.join("\n")) }
+        }
+        // 도구 실행 결과를 인터랙티브 화면처럼 한 줄 요약으로
+        "user" => {
+            let content = evt.get("message")?.get("content")?.as_array()?;
+            let mut parts = Vec::new();
+            for b in content {
+                if b.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
+                    if let Some(c) = b.get("content") {
+                        // Task(서브에이전트) 결과는 process_teammates 가 따로 처리하므로 본문은 짧게만
+                        if let Some(line) = fmt_tool_result(c) { parts.push(line); }
+                    }
                 }
             }
             if parts.is_empty() { None } else { Some(parts.join("\n")) }
@@ -527,6 +608,8 @@ fn create_agent(
         session_id: None,
         role: Some(role.clone()),
         output: vec![],
+        started_at: Some(std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)),
     };
     state.agents.lock().unwrap().insert(id.clone(), info.clone());
     let _ = app.emit("agent_update", info);
@@ -1273,6 +1356,7 @@ fn restore_agents(app: AppHandle, repo: String) -> Vec<AgentInfo> {
                         session_id: None,
                         role: None,
                         output: vec![],
+                        started_at: None,
                     });
                 state.agents.lock().unwrap().insert(id, info);
             }

@@ -194,13 +194,21 @@ function makeDemoApi(){
   let n = 0;
   function demoRun(args){
     const ko = lang === "ko";
-    const sample = ["▶ " + (ko ? "오케스트레이터 시작" : "Orchestrator start"), "🔧 Task → debugger", "🔧 Task → implementer",
-                    ko ? "전문가 결과를 모아 검토 중…" : "Collecting expert results…", "🔧 Task → code-reviewer", ko ? "완료. 요약 정리!" : "Done. Summarizing!"];
+    const sample = [
+      "▶ " + (ko ? "세션 시작 · claude-sonnet-4-6" : "Session start · claude-sonnet-4-6"),
+      "🔧 Read  📖 src/login.js",
+      "🔧 Glob  🔍 **/*.test.js",
+      "🔧 Bash  $ npm test --silent",
+      "  ↳ 3 passed, 0 failed",
+      "🔧 Task  🧑‍💼 → debugger  (이벤트 핸들러 누락 추적)",
+      "🔧 Edit  ✏️ src/login.js",
+      ko ? "수정을 적용했어요. 검증 통과." : "Applied the fix. Tests pass.",
+    ];
     const id = "demo" + (++n);
     const role = args.team ? "team" : (args.agent || "orchestrator");
     const a = { id, branch: "demo-" + n, prompt: args.prompt || "demo", model: args.model || "sonnet",
                 permission: args.permission || "acceptEdits", worktree: "/demo/내-프로젝트/.agentboard/demo-" + n,
-                role, status: "creating", cost: null, output: [] };
+                role, status: "creating", cost: null, output: [], started_at: Date.now() };
     agents[id] = a;
     emit("agent_update", { ...a });
     // 데모도 웜업 → running 흐름을 보여줌
@@ -406,6 +414,20 @@ function enterApp(){
   // Claude Code 사용량(stats-cache) 동기화 — 즉시 + 15초 주기
   refreshUsage();
   if (!window.__usageTimer) window.__usageTimer = setInterval(refreshUsage, 15000);
+  // 1초마다 헤더 메타(경과시간/whirlpool) 갱신 — 진행 중 작업에만 의미 있음
+  if (!window.__tickTimer) window.__tickTimer = setInterval(() => {
+    if (selectedId && state.has(selectedId)) {
+      const a = state.get(selectedId);
+      if (a.status === "running" || a.status === "warming" || a.status === "creating") {
+        const el = document.querySelector(".av-meta .av-run");
+        if (el) {
+          // 새 마크업으로 교체
+          const tmp = document.createElement("div"); tmp.innerHTML = renderRunMeta(a);
+          if (tmp.firstChild) el.replaceWith(tmp.firstChild);
+        }
+      }
+    }
+  }, 1000);
 }
 
 // 토큰 소스 세그먼트(구독/API) 동기화 + 전환
@@ -717,6 +739,18 @@ function fmtDuration(ms){
   return `${m}m ${sec}s`;
 }
 
+// 작업 진행 중일 때 헤더에 경과시간/토큰 펄스 표시 (인터랙티브 claude의 'Whirlpooling… 8s · ↑227 tokens' 대응)
+function renderRunMeta(a){
+  const live = a.status === "running" || a.status === "warming" || a.status === "creating";
+  const startedAt = a.started_at;
+  const tin = a.tokens_in || 0, tout = a.tokens_out || 0;
+  if (!live && !tin && !tout) return "";
+  const elapsed = startedAt ? fmtDuration(Date.now() - startedAt) : "";
+  const tok = (tin + tout) > 0 ? `↑${fmtTok(tin)} ↓${fmtTok(tout)}` : "";
+  const dot = live ? `<span class="whirl">∗</span> ` : "";
+  return `<span class="av-run">${dot}${elapsed ? "· " + elapsed : ""}${tok ? " · " + tok : ""}</span>`;
+}
+
 function renderSubConsoles(a){
   const tm = a.teammates; if (!tm || !Object.keys(tm).length) return "";
   const cards = Object.keys(tm).map(name => {
@@ -891,6 +925,7 @@ function renderAgentView(a){
        <div class="av-meta">
          <span class="av-model">${esc(a.branch || a.id)}</span>
          ${a.model ? `<span>· ${esc(a.model)}</span>` : ""}
+         ${renderRunMeta(a)}
          ${a.cost != null ? `<span class="av-cost">$${Number(a.cost).toFixed(4)}</span>` : ""}
        </div>
      </div>

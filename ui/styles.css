@@ -260,6 +260,9 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 
 .av-meta{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--dim);display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .av-meta .av-model{color:var(--ink)} .av-meta .av-cost{color:var(--accent)}
+.av-run{color:var(--run);display:inline-flex;align-items:center;gap:5px}
+.av-run .whirl{display:inline-block;color:var(--run);animation:whirl 1s linear infinite;font-size:13px}
+@keyframes whirl{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
 
 /* 오케스트레이터 → 전문가 호출 바 */
 .orch-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-size:12px}
