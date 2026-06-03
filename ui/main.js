@@ -236,6 +236,9 @@ const I18N = {
     diffSuffix: " — 바뀐 점", diffLoading: "불러오는 중…", diffNone: "바뀐 점이 없어요.",
     diffSummary: "이번에 <b>파일 {0}개</b>가 바뀌어요. <span class='diff-add'>+{1}</span> <span class='diff-del'>-{2}</span> · 파일을 클릭하면 자세히 볼 수 있어요.",
     capped: "⚠ 비용 상한 ${0} 도달(현재 ${1}) — 진행 중인 작업을 멈췄어요. 계속하려면 위에서 상한을 올리세요.",
+    authExpired: "🔐 Claude 인증이 만료되었어요. 터미널에서 `claude /login` 후 ClaudeCrew를 다시 시작해주세요.",
+    authExpiredLine: "ℹ 안내: 비밀번호 변경 등으로 토큰이 무효화되었습니다. ① 터미널에서 `claude` 실행 → /login ② 본 앱 종료 후 재실행",
+    todayTokens: "오늘 토큰", subTokenHint: "구독 플랜이라 별도 청구는 없어요. 누적 토큰만 참고용으로 표시해요.",
     demoBadge: "🖥️ 데모 모드 — 화면 미리보기예요. 실제 작업(파일 수정·저장)은 데스크톱 앱에서 동작해요.",
     demoCheck: "데모 모드 (브라우저 미리보기)", demoSetup: "데모: 실제 설치는 데스크톱 앱에서 진행됩니다.", demoCommit: "데모: 실제 저장(commit)은 데스크톱 앱에서 됩니다.",
     rfNeedName: "이름과 부탁 문구를 적어주세요.", rfSaved: "레시피를 저장했어요.", rfDeleted: "레시피를 삭제했어요.",
@@ -328,6 +331,9 @@ const I18N = {
     diffSuffix: " — Changes", diffLoading: "Loading…", diffNone: "No changes.",
     diffSummary: "<b>{0} file(s)</b> changed. <span class='diff-add'>+{1}</span> <span class='diff-del'>-{2}</span> · Click a file to see details.",
     capped: "⚠ Cost cap ${0} reached (now ${1}) — running work was stopped. Raise the cap above to continue.",
+    authExpired: "🔐 Claude auth expired. Run `claude /login` in a terminal, then restart ClaudeCrew.",
+    authExpiredLine: "ℹ Hint: token likely invalidated (password change?). ① Run `claude` → /login ② Quit and relaunch this app.",
+    todayTokens: "Tokens today", subTokenHint: "You're on a subscription — no per-token billing. Token total is informational.",
     demoBadge: "🖥️ Demo mode — this is a UI preview. Real work (editing/saving files) runs in the desktop app.",
     demoCheck: "Demo mode (browser preview)", demoSetup: "Demo: real install happens in the desktop app.", demoCommit: "Demo: real saving (commit) happens in the desktop app.",
     rfNeedName: "Please enter a name and request text.", rfSaved: "Recipe saved.", rfDeleted: "Recipe deleted.",
@@ -399,6 +405,9 @@ I18N.ja = {
   newTask: "＋ 新規タスク", newTabLabel: "＋ 新規タスク",
   fltAll: "全て", fltRunning: "進行", fltDone: "完了", fltError: "エラー",
   grpActive: "▶ 進行中", grpDone: "✓ 完了", grpIssue: "⚠ 要確認",
+  authExpired: "🔐 Claude 認証が切れています。ターミナルで `claude /login` 後、ClaudeCrew を再起動してください。",
+  authExpiredLine: "ℹ パスワード変更等でトークンが無効化された可能性。① `claude` → /login ② 本アプリ終了して再起動",
+  todayTokens: "本日トークン", subTokenHint: "サブスクなので個別課金なし。累計トークンは参考表示のみ。",
   minimapTab: "ミニマップ", verifyTab: "検証",
   tlPlay: "再生/一時停止", tlBack: "最初へ", tlLive: "ライブ",
   popout: "🪟 別ウィンドウ",
@@ -612,7 +621,7 @@ function classifyLine(line){
   if (/^📚 /.test(line)) return "system";
   if (/^❌ /.test(line)) return "error";
   if (/^\$ claude /.test(line) || /^\[알림\] /.test(line)) return "diag";
-  if (/^💬 사용자: /.test(line)) return "user";
+  if (/^\s*💬 사용자: /.test(line)) return "user";
   return "answer";
 }
 function groupLines(output){
@@ -702,7 +711,9 @@ function renderGroup(g, isLastOpen){
     </details>`;
   }
   if (g.kind === "user"){
-    return `<div class="grp grp-user">${esc(g.text)}</div>`;
+    // "💬 사용자: ..." → 라벨 떼고 본문만 풍선에. 멀티라인 보존.
+    const body = g.text.replace(/^\s*💬 사용자:\s*/, "");
+    return `<div class="grp grp-user"><div class="bubble-user">${esc(body).replace(/\n/g,"<br>")}</div><div class="user-avatar" aria-hidden="true">🙋</div></div>`;
   }
   if (g.kind === "system") return `<div class="grp grp-system">${esc(g.text)}</div>`;
   if (g.kind === "error")  return `<div class="grp grp-error">${esc(g.text)}</div>`;
@@ -880,6 +891,21 @@ function showBoot(msg){
   el.classList.remove("hidden");
 }
 function hideBoot(){ const el = $("#bootToast"); if (el) el.classList.add("hidden"); }
+// 일반 토스트 — info|warn|err. ms 후 자동 숨김. native alert 대체용
+function showToast(msg, kind, ms){
+  let stack = $("#toastStack");
+  if (!stack){
+    stack = document.createElement("div"); stack.id = "toastStack"; stack.className = "toast-stack";
+    document.body.appendChild(stack);
+  }
+  const el = document.createElement("div");
+  el.className = "cc-toast " + (kind || "info");
+  el.innerHTML = `<span class="cc-toast-msg">${esc(msg)}</span><button class="cc-toast-x" aria-label="close">×</button>`;
+  stack.appendChild(el);
+  const close = () => { el.classList.add("out"); setTimeout(()=>el.remove(), 200); };
+  el.querySelector(".cc-toast-x").addEventListener("click", close);
+  setTimeout(close, Math.max(2000, ms || 5000));
+}
 
 async function enterApp(){
   // detached: 단일 작업 풀스크린 — 사이드바·탭바 숨김, 해당 작업만 자동 선택
@@ -1466,10 +1492,26 @@ function render(){
 }
 
 function renderStatusStrip(){
-  const total = costTotal();
-  $("#costTotal").textContent = "$" + total.toFixed(2);
-  const cap = parseFloat($("#costCap")?.value);
-  $("#costTotal").classList.toggle("warn", !isNaN(cap) && cap > 0 && total >= cap * 0.8);
+  // 구독 모드: USD는 추정치라 의미 없음 — 오늘 누적 토큰만 표시(참고용).
+  //  - costTotal()은 stream-json result의 total_cost_usd 합계(API 모드에서만 정확).
+  //  - read_usage.today_tokens = stats-cache.json의 오늘 총 토큰.
+  const lab = $("[data-i18n='usage']");
+  const cap = $(".capctl");
+  const totEl = $("#costTotal");
+  if (authMode === "subscription"){
+    if (lab) { lab.textContent = t("todayTokens") + " "; lab.parentElement?.setAttribute("title", t("subTokenHint")); }
+    const todayTok = (usageStats && usageStats.today_tokens) || 0;
+    if (totEl){ totEl.textContent = fmtTok(todayTok); totEl.classList.remove("warn"); }
+    if (cap) cap.classList.add("hidden");
+  } else {
+    // API 모드 — 기존 USD/상한 노출
+    if (lab) { lab.textContent = t("usage") + " "; lab.parentElement?.setAttribute("title", t("usageTitle") || ""); }
+    const total = costTotal();
+    if (totEl) totEl.textContent = "$" + total.toFixed(2);
+    const capVal = parseFloat($("#costCap")?.value);
+    if (totEl) totEl.classList.toggle("warn", !isNaN(capVal) && capVal > 0 && total >= capVal * 0.8);
+    if (cap) cap.classList.remove("hidden");
+  }
   const running = [...state.values()].filter(a => a.status === "running" || a.status === "creating").length;
   $("#apiHint")?.classList.toggle("hidden", running < 3 || authMode === "api"); // API면 구독 한도 걱정 불필요
 }
@@ -1877,6 +1919,12 @@ listen("agent_output", (ev) => {
   const { id, text } = ev.payload; const a = state.get(id); if (!a) return;
   const wasEmpty = !(a.output && a.output.length);
   (a.output = a.output || []).push(text);
+  // 401 인증 실패 감지 — 한 번만 토스트 + 안내
+  if (!a._authWarned && /401\s*Invalid authentication credentials|API Error:\s*401/i.test(text)) {
+    a._authWarned = true;
+    showToast(t("authExpired"), "warn", 8000);
+    (a.output = a.output).push(t("authExpiredLine"));
+  }
   if (id !== selectedId) return;                 // 안 보이는 탭은 상태만 누적
   const term = document.getElementById("term-" + id);
   if (pretty) {

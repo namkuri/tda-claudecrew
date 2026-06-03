@@ -157,6 +157,11 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **비동기 enterApp**: `check_claude`/`get_cost_cap`/`check_api_mode`/`loadAgents`/`refreshUsage`를 `Promise.allSettled`로 병렬. 화면이 즉시 응답하고 컴포저 입력 가능. 우상단에 떠다니는 **부트 토스트**(스피너 + "준비 중…"/"이전 작업 복원 중…"). 완료 자동 숨김.
   - **detached 양방향**: 별도 창에서 보던 작업이 메인에서 `agent_removed`로 제거되면 친화 메시지 "⚠ 이 작업이 메인에서 제거되었어요. 창을 닫아도 좋아요."
   - **분할 패널 모드**: 메인 콘솔 헤더에 **⊟ 분할** 탭 추가 — 콘솔(좌)과 미니맵(우) 동시 표시. `cc_pane_<id>` localStorage 영속화. 좁은 창에서는 자동 상하 분할.
+- **인증 친화 진단 + 사용자 풍선 + 구독 모드 비용 숨김(v0.17.0)**:
+  - **401 인증 친화 안내**: claude 출력에서 `401 Invalid authentication credentials` 패턴 감지 → UI 토스트(`🔐 Claude 인증이 만료되었어요. 터미널에서 \`claude /login\` 후 ClaudeCrew를 다시 시작해주세요.`) + output에 안내 라인. 백엔드 종료 진단도 `saw_401` 분기 추가 — 출력 끝에 친화 가이드.
+  - **사용자 메시지 우측 풍선**: pretty 모드에서 `💬 사용자: ...`를 우측 정렬 + 그라데이션 풍선(코랄→브론즈) + 🙋 아바타. classifyLine 정규식 `^\s*💬` — 백엔드가 `\n` prefix 붙여 보내도 매칭.
+  - **구독 모드 비용 숨김**: `authMode='subscription'`일 때 헤더 `$1.92` 같은 추정치 숨기고 `오늘 토큰 N` 표시(stats-cache 기반, 참고용). 상한 입력도 같이 숨김. API 모드 전환 시 즉시 USD/상한 복귀. 추정치를 실제 청구처럼 보이지 않게.
+  - **showToast 헬퍼**: native alert 대체용 — `info|warn|err` 색상, 자동 닫힘, 사용자 닫기 버튼.
 - **3-in-1 우측 패널 + 타임라인 시간 표시 + 작업 그룹 + 일본어(v0.16.0)**:
   - **3-in-1 도킹**: 우측 `gitpanel` 한 패널 안에서 `🌿 Git`/`🗺 미니맵`/`🧪 검증` 탭 전환. `cc_rightPanel` localStorage 영속화. 좁은 창에서 패널 3개 펼치지 않고도 모든 정보 접근.
   - **패널 팝아웃**: `open_task_window(id, panel)`에 두 번째 인자(`minimap`/`verify`). 해당 패널만 띄우는 단일 창 모드(`?panel=minimap`). CSS `.detached-panel-minimap`이 콘솔 숨기고 패널 전체 폭으로.

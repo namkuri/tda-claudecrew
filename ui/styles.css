@@ -175,6 +175,16 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .boot-spin{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:bootspin .9s linear infinite;display:inline-block;flex:none}
 @keyframes bootspin{to{transform:rotate(360deg)}}
 .detached-removed{padding:40px 30px;text-align:center;color:var(--err);font-size:14px}
+/* 일반 토스트 — info|warn|err */
+.toast-stack{position:fixed;top:54px;right:14px;z-index:70;display:flex;flex-direction:column;gap:8px;max-width:380px}
+.cc-toast{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px;font-size:12.5px;color:var(--ink);box-shadow:0 6px 18px rgba(0,0,0,.45);display:flex;align-items:flex-start;gap:10px;animation:toastIn .18s ease-out;line-height:1.45}
+.cc-toast.warn{border-color:var(--claude);background:linear-gradient(180deg, color-mix(in srgb, var(--claude) 12%, var(--panel)) 0%, var(--panel) 100%)}
+.cc-toast.err{border-color:var(--err);background:linear-gradient(180deg, rgba(255,107,107,.12) 0%, var(--panel) 100%)}
+.cc-toast.out{opacity:0;transform:translateY(-6px);transition:opacity .18s, transform .18s}
+.cc-toast .cc-toast-msg{flex:1}
+.cc-toast .cc-toast-x{background:transparent;border:0;color:var(--dim);cursor:pointer;font-size:16px;line-height:1;padding:0 2px}
+.cc-toast .cc-toast-x:hover{color:var(--ink)}
+@keyframes toastIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
 
 /* 좌: 워크스페이스 사이드바 */
 .sidebar{display:flex;flex-direction:column;border-right:1px solid var(--line);background:var(--panel);min-height:0}
@@ -352,7 +362,18 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 /* 시스템/오류/사용자/추론/답변 색 분리 */
 .con-body.pretty .grp-system{color:var(--dim);font-family:var(--mono);font-size:12px;padding:2px 4px}
 .con-body.pretty .grp-error{color:var(--err);padding:6px 10px;border:1px solid var(--err);border-radius:6px;background:rgba(255,107,107,.06)}
-.con-body.pretty .grp-user{color:var(--claude);font-weight:600;padding:6px 10px;border-left:3px solid var(--claude);background:var(--panel2);border-radius:0 6px 6px 0}
+.con-body.pretty .grp-user{display:flex;justify-content:flex-end;align-items:flex-end;gap:6px;margin:10px 0 10px auto;max-width:80%}
+.con-body.pretty .grp-user .bubble-user{
+  background:linear-gradient(135deg, var(--claude) 0%, color-mix(in srgb, var(--claude) 70%, #8b5a2b) 100%);
+  color:#fff;padding:9px 13px;border-radius:14px 14px 4px 14px;
+  box-shadow:0 1px 3px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.12);
+  line-height:1.45;word-break:break-word;font-weight:500;
+}
+.con-body.pretty .grp-user .user-avatar{
+  font-size:16px;line-height:1;padding:4px 6px;border-radius:50%;
+  background:var(--panel2);border:1px solid var(--line);
+  flex:0 0 auto;align-self:flex-end;
+}
 .con-body.pretty .grp-thinking{opacity:.85}
 .con-body.pretty .grp-thinking>summary{cursor:pointer;list-style:none;padding:4px 10px;background:var(--panel2);border-radius:6px;color:var(--idle);font-size:11.5px}
 .con-body.pretty .grp-thinking>summary::-webkit-details-marker{display:none}

@@ -946,13 +946,19 @@ fn run_agent(
         keepgoing, use_subscription, effective_resume.as_deref(), false,
     );
 
-    // 4) 종료 진단
+    // 4) 종료 진단 — 401(인증 만료)이 보였으면 우선 안내
     {
         let state = app.state::<AppState>();
-        let useful_lines = state.agents.lock().unwrap().get(&id)
-            .map(|a| a.output.iter().filter(|l| !l.starts_with("$ claude ") && !l.starts_with("📚 ") && !l.starts_with("[알림]")).count())
-            .unwrap_or(0);
-        if !ok && useful_lines == 0 {
+        let (useful_lines, saw_401) = state.agents.lock().unwrap().get(&id)
+            .map(|a| {
+                let useful = a.output.iter().filter(|l| !l.starts_with("$ claude ") && !l.starts_with("📚 ") && !l.starts_with("[알림]")).count();
+                let auth = a.output.iter().any(|l| l.contains("401") && l.to_lowercase().contains("authentication"));
+                (useful, auth)
+            })
+            .unwrap_or((0, false));
+        if !ok && saw_401 {
+            emit_output(&app, &id, "🔐 인증 만료 — 터미널에서 `claude /login` 후 ClaudeCrew를 다시 실행하세요. (구글 비밀번호 변경 등으로 토큰이 무효화됐을 수 있어요.)");
+        } else if !ok && useful_lines == 0 {
             let code = exit_code.map(|c| c.to_string()).unwrap_or_else(|| "?".into());
             emit_output(&app, &id, &format!("❌ claude 가 출력 없이 종료(exit {code})."));
             emit_output(&app, &id, "→ 흔한 원인: (1) Claude Code 로그인 만료 — 터미널에서 `claude` 실행. (2) PATH에서 claude 미발견. (3) 잘못된 인자.");
