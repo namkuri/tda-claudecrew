@@ -1227,12 +1227,13 @@ fn process_teammates(app: &AppHandle, agent_id: &str, evt: &Value, map: &mut Has
                         let started_at_ms: i64 = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
                         if !tuid.is_empty() {
-                            map.insert(tuid, name.clone());
+                            map.insert(tuid.clone(), name.clone());
                         }
                         let _ = app.emit(
                             "teammate_update",
                             serde_json::json!({
                                 "agentId": agent_id, "name": name,
+                                "tuid": tuid,
                                 "desc": desc_short,
                                 "prompt": prompt_short,
                                 "model": parent_model,
@@ -1267,7 +1268,7 @@ fn process_teammates(app: &AppHandle, agent_id: &str, evt: &Value, map: &mut Has
                                 let _ = app.emit(
                                     "teammate_update",
                                     serde_json::json!({
-                                        "agentId": agent_id, "name": name, "desc": "",
+                                        "agentId": agent_id, "name": name, "tuid": tuid, "desc": "",
                                         "result": snippet,
                                         "status": if is_error { "error" } else { "done" },
                                         "isError": is_error,

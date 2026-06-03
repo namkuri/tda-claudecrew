@@ -157,6 +157,11 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **비동기 enterApp**: `check_claude`/`get_cost_cap`/`check_api_mode`/`loadAgents`/`refreshUsage`를 `Promise.allSettled`로 병렬. 화면이 즉시 응답하고 컴포저 입력 가능. 우상단에 떠다니는 **부트 토스트**(스피너 + "준비 중…"/"이전 작업 복원 중…"). 완료 자동 숨김.
   - **detached 양방향**: 별도 창에서 보던 작업이 메인에서 `agent_removed`로 제거되면 친화 메시지 "⚠ 이 작업이 메인에서 제거되었어요. 창을 닫아도 좋아요."
   - **분할 패널 모드**: 메인 콘솔 헤더에 **⊟ 분할** 탭 추가 — 콘솔(좌)과 미니맵(우) 동시 표시. `cc_pane_<id>` localStorage 영속화. 좁은 창에서는 자동 상하 분할.
+- **미니맵 에이전트 로스터·말풍선 + 텔레포트 수정(v0.24.0)**:
+  - **팀장 텔레포트 제거**: 기존 SMIL `animateTransform` 무한루프(최근 12좌표 순회)가 아이콘을 난리치게 함 → 제거. 팀장 마커는 마지막 활동 노드에 '정착', 새 활동이 오면 re-render로 자연히 이동.
+  - **tuid 키잉(백엔드)**: `process_teammates`가 working/done emit에 `tuid`(Task tool_use id) 포함. 프론트는 `tuid||name`으로 키잉 → 같은 전문가 타입 여러 명도 개별 카드로 구분(기존엔 name 충돌로 1개로 합쳐짐). 표시용 `m.name` 별도 저장.
+  - **에이전트 로스터 + 말풍선**: 미니맵 상단에 팀장(부모)+각 팀원 카드. 아바타(상태 점: working 펄스/done/error) + 이름 + **말풍선**(뭐 하는지: 팀장=최근 활동 `📖 파일명`/완료 시 `완료 · N개 파일`, 팀원=desc 또는 결과 요약).
+  - 표시 사이트(renderOrchBar/renderSubConsoles/board)도 `m.name` 기반으로 통일.
 - **Conductor 스타일 레이아웃 차용(v0.23.0)**:
   - **우측 패널 Files/Changes/Review 탭**: 기존 Git/검증을 Conductor 트리오로 재편 + 🗺 Map · 🖥 Term. `rightTabsHtml`에 우상단 브랜치 pill(`⤴ <branch>`). cc_rightPanel `git→files`/`verify→review` 마이그레이션.
   - **Files = 디렉터리 그룹 트리**: 변경 파일을 디렉터리별로 묶어 대문자 경로 헤더(스크린샷 스타일) + 파일 아이콘(확장자별) + ±카운트. 행 클릭 → Changes 탭으로 점프.

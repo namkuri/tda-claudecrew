@@ -618,7 +618,29 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .con-body.splitp .splitp-term{padding:14px 16px;overflow:auto;border-right:1px solid var(--line)}
 .con-body.splitp .splitp-map{overflow:auto}
 @media(max-width:1100px){ .con-body.splitp{grid-template-columns:1fr;grid-template-rows:1fr 1fr} .con-body.splitp .splitp-term{border-right:none;border-bottom:1px solid var(--line)} }
-.mm-grid{display:grid;grid-template-columns:1fr 1fr;height:100%;min-height:280px}
+/* 미니맵 — 에이전트 로스터(말풍선) + 트리/로그 그리드 */
+.mm-wrap{display:flex;flex-direction:column;height:100%}
+.mm-roster{padding:8px 10px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:6px;flex:none;max-height:40%;overflow:auto}
+.mm-roster-h{font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.5px;font-weight:600;display:flex;align-items:center;gap:6px;margin-bottom:2px}
+.mm-ag-card{display:flex;gap:8px;align-items:flex-start;padding:6px 8px;border-radius:8px;background:var(--panel2);border:1px solid var(--line)}
+.mm-ag-card.lead{border-left:3px solid var(--claude)}
+.mm-ag-card.working{box-shadow:0 0 0 1px rgba(232,148,103,.25)}
+.mm-ag-card.error{border-color:var(--err)}
+.mm-ag-ava{position:relative;flex:0 0 auto;width:30px;height:30px;border-radius:50%;background:rgba(232,148,103,.12);display:flex;align-items:center;justify-content:center}
+.mm-ag-card.lead .mm-ag-ava{background:var(--claude)}
+.mm-ag-ic{font-size:15px;line-height:1}
+.mm-ag-dot{position:absolute;right:-1px;bottom:-1px;width:9px;height:9px;border-radius:50%;border:2px solid var(--panel);background:var(--idle)}
+.mm-ag-dot.working{background:var(--run);animation:nodepulse 1.4s ease-in-out infinite}
+.mm-ag-dot.done{background:var(--done)}
+.mm-ag-dot.error{background:var(--err)}
+.mm-ag-body{flex:1;min-width:0}
+.mm-ag-name{font-size:11.5px;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:5px}
+.mm-ag-tag{font-size:9px;background:var(--claude);color:#1a1410;border-radius:999px;padding:0 6px;font-weight:700}
+/* 말풍선 — 뭐 하고 있는지 */
+.mm-ag-bubble{position:relative;margin-top:4px;background:var(--bg);border:1px solid var(--line);border-radius:4px 8px 8px 8px;padding:5px 8px;font-size:11px;color:var(--dim);line-height:1.4;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}
+.mm-ag-card.working .mm-ag-bubble{color:var(--ink)}
+.mm-ag-bubble::before{content:"";position:absolute;left:8px;top:-5px;width:0;height:0;border:5px solid transparent;border-bottom-color:var(--line);border-top:0}
+.mm-grid{display:grid;grid-template-columns:1fr 1fr;height:100%;min-height:200px;flex:1}
 .mm-tree,.mm-log{padding:10px 14px;overflow:auto;font-size:12px}
 .mm-tree{border-right:1px solid var(--line)}
 .mm-head{font-weight:700;color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.4px;padding:4px 0 8px;border-bottom:1px solid var(--line);margin-bottom:6px;display:flex;align-items:center;gap:6px}

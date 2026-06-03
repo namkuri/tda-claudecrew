@@ -117,82 +117,65 @@ function renderMinimap(a, opts){
     const last = lastAct.target.split(/[\\/]/).filter(Boolean).pop();
     return layout.nodes.findIndex(n => n.isFile && n.name === last);
   })();
-  // 에이전트 배지(들) — 작업 status에 따라 동작 분기:
-  //   running/creating/warming → path 따라 이동(SMIL animateTransform)
-  //   done/error/stopped       → 마지막 활동 노드에 고정 + "완료" 라벨
-  // 또한 호출된 서브에이전트마다 개별 배지를 띄움(여러 명이 보임).
   const isLive = a.status === "running" || a.status === "creating" || a.status === "warming";
   const doneLabel = a.status === "done" ? (lang === "en" ? "done" : (lang === "ja" ? "完了" : "완료"))
                   : a.status === "error" ? (lang === "en" ? "error" : (lang === "ja" ? "失敗" : "실패"))
                   : a.status === "stopped" ? (lang === "en" ? "stopped" : (lang === "ja" ? "停止" : "정지"))
                   : "";
-  // 호출된 에이전트 목록 — teammates(서브에이전트들) + 부모 role.
-  const activeAgents = (() => {
-    const list = [];
-    const tm = a.teammates || {};
-    const tmKeys = Object.keys(tm);
-    // 서브에이전트 — 각자가 마지막에 손댄 파일(있으면)로 위치
-    for (const name of tmKeys) {
-      const m = mate(tm, name);
-      const status = m.status || "working";
-      list.push({ role: name, status });
-    }
-    // 부모(오케스트레이터/팀장) — 서브가 0이면 단독, 있으면 함께 표시
-    list.push({ role: a.role || "orchestrator", status: a.status, primary: true });
-    return list;
-  })();
-  // 각 에이전트의 위치를 결정 — primary는 path를 따라가고, 서브들은 자신이 손댄 마지막 파일에 머무름.
-  // 서브에이전트는 act 안에 직접 정보가 없어 결과적으로 모두 lastFileIdx 노드 근처에 분산 배치.
+
+  // 트리 위 팀장 마커 — 마지막 활동 노드에 '정착'(텔레포트 없음). 새 활동이 오면 re-render로 자연히 이동.
   const agentBadge = (() => {
     if (lastFileIdx < 0) return "";
-    // primary 에이전트의 path 시퀀스
-    const seq = (() => {
-      const recentActs = acts.slice(-Math.min(12, acts.length));
-      const coords = [];
-      for (const act of recentActs) {
-        const last = (act.target || "").split(/[\\/]/).filter(Boolean).pop();
-        if (!last) continue;
-        let node = layout.nodes.find(n => n.isFile && n.name === last);
-        if (!node) node = layout.nodes.find(n => !n.isFile && n.name === last);
-        if (!node && layout.nodes.length) node = layout.nodes[lastFileIdx >= 0 ? lastFileIdx : 0];
-        if (node) coords.push(`${node.x + 200},${node.y - 4}`);
-      }
-      if (coords.length === 1) coords.push(coords[0]);
-      return coords;
-    })();
-    const pathStr = seq.join(";");
-    const dur = Math.max(2.5, seq.length * 0.7);
     const lastN = layout.nodes[lastFileIdx];
-    const finalCoord = `${lastN.x + 200},${lastN.y - 4}`;
+    const b = badgeOf(a.role || "orchestrator");
+    const stateCls = isLive ? "live" : (a.status === "error" ? "err" : "rest");
+    const labelText = doneLabel ? `${b[lang === "en" ? "en" : "ko"]} · ${doneLabel}` : b[lang === "en" ? "en" : "ko"];
+    return `<g class="mm-agent ${stateCls}" transform="translate(${lastN.x + 200},${lastN.y - 4})">
+      <circle r="13" cx="0" cy="13" fill="var(--claude)" />
+      <text x="0" y="18" text-anchor="middle" font-size="13">${b.icon}</text>
+      <text x="-18" y="9" text-anchor="end" font-size="9" class="mm-agent-label">${esc(labelText)}</text>
+    </g>`;
+  })();
 
-    // primary 배지 — running이면 path 애니, 끝났으면 마지막 위치에 정지
-    const pBadge = (() => {
-      const a0 = activeAgents.find(x => x.primary) || { role: "orchestrator", status: a.status };
-      const b = badgeOf(a0.role);
-      const labelText = doneLabel ? `${b[lang === "en" ? "en" : "ko"]} · ${doneLabel}` : b[lang === "en" ? "en" : "ko"];
-      const anim = isLive && seq.length >= 2 ? `<animateTransform attributeName="transform" type="translate" values="${pathStr}" keyTimes="${seq.map((_,i)=>(i/(seq.length-1)).toFixed(3)).join(";")}" dur="${dur}s" repeatCount="indefinite" calcMode="spline" keySplines="${seq.slice(1).map(()=>"0.4 0 0.6 1").join(";")}" />` : "";
-      const staticTransform = isLive ? "" : ` transform="translate(${finalCoord})"`;
-      const stateCls = isLive ? "live" : (a.status === "error" ? "err" : "rest");
-      return `<g class="mm-agent ${stateCls}"${staticTransform}>
-        <circle r="13" cx="0" cy="13" fill="var(--claude)" />
-        <text x="0" y="18" text-anchor="middle" font-size="13">${b.icon}</text>
-        <text x="-18" y="9" text-anchor="end" font-size="9" class="mm-agent-label">${esc(labelText)}</text>
-        ${anim}
-      </g>`;
+  // 에이전트 로스터 — 팀장(부모) + 각 팀원(서브에이전트). 아바타 + 상태 + 말풍선(뭐 하는지).
+  const rosterHtml = (() => {
+    const items = [];
+    // 팀장(부모) 말풍선 = 최근 활동 한 줄(파일명 + 동작), 끝났으면 완료 라벨
+    const leadSpeech = (() => {
+      if (doneLabel && !isLive) {
+        const fileN = (a._stat && a._stat.files) ? a._stat.files.length : 0;
+        return doneLabel + (fileN ? ` · ${fileN}${lang === "en" ? " files" : (lang === "ja" ? "ファイル" : "개 파일")}` : "");
+      }
+      const last = acts[acts.length - 1];
+      if (!last) return t("mmIdle");
+      const base = (last.target || "").split(/[\\/]/).filter(Boolean).pop() || last.target || "";
+      return `${activityIcon(last.kind)} ${base}`.trim();
     })();
-
-    // 서브에이전트들 — 마지막 활동 노드 주변에 분산 배치(작은 원, 작업 종료 후 그대로 정지)
-    const subBadges = activeAgents.filter(x => !x.primary).map((x, i) => {
-      const b = badgeOf(x.role);
-      const dx = 220 + (i % 3) * 14;
-      const dy = lastN.y + 22 + Math.floor(i / 3) * 18;
-      const stateCls = x.status === "working" ? "live" : (x.status === "error" ? "err" : "rest");
-      return `<g class="mm-agent sub ${stateCls}" transform="translate(${dx}, ${dy})">
-        <circle r="8" cx="0" cy="0" fill="var(--accent)" opacity="0.85" />
-        <text x="0" y="3" text-anchor="middle" font-size="10">${b.icon}</text>
-      </g>`;
+    items.push({ key: "__lead", role: a.role || "orchestrator", status: a.status, primary: true, speech: leadSpeech });
+    // 팀원들(서브에이전트) — tuid 키로 각자 구분
+    const tm = a.teammates || {};
+    for (const k of Object.keys(tm)) {
+      const m = mate(tm, k);
+      const nm = m.name || k;
+      const speech = (m.status === "done") ? (m.result ? m.result.slice(0, 70) : t("sub_done"))
+                   : (m.status === "error") ? (m.result || t("sub_failed"))
+                   : (m.desc || m.prompt || t("sub_working"));
+      items.push({ key: k, role: nm, status: m.status, speech });
+    }
+    const cards = items.map(ag => {
+      const b = badgeOf(ag.role);
+      const live = (ag.status === "working") || ["running","creating","warming"].includes(ag.status);
+      const stCls = live ? "working" : (ag.status === "error" ? "error" : (ag.status === "done" ? "done" : "rest"));
+      const nm = lang === "en" ? b.en : b.ko;
+      return `<div class="mm-ag-card ${stCls} ${ag.primary ? "lead" : ""}">
+        <div class="mm-ag-ava"><span class="mm-ag-ic">${b.icon}</span><span class="mm-ag-dot ${stCls}"></span></div>
+        <div class="mm-ag-body">
+          <div class="mm-ag-name">${esc(nm)}${ag.primary ? ` <span class="mm-ag-tag">${esc(t("mmLead"))}</span>` : ""}</div>
+          <div class="mm-ag-bubble" title="${esc(ag.speech || "")}">${esc(ag.speech || "")}</div>
+        </div>
+      </div>`;
     }).join("");
-    return pBadge + subBadges;
+    return `<div class="mm-roster"><div class="mm-roster-h">${esc(t("mmAgents"))} <span class="mm-count">${items.length}</span></div>${cards}</div>`;
   })();
 
   const edgesSvg = layout.edges.map(e => `<path d="M${e.x1} ${e.y1} C${e.x1} ${(e.y1 + e.y2)/2}, ${e.x2 - 12} ${e.y2}, ${e.x2} ${e.y2}" class="mm-edge"/>`).join("");
@@ -233,20 +216,23 @@ function renderMinimap(a, opts){
   const others = acts.filter(a => ["Glob","Grep","Bash","PowerShell"].includes(a.kind));
   const otherCount = ["Glob","Grep","Bash"].map(k => `${activityIcon(k)} ${others.filter(o => o.kind === k).length}`).join("  ");
 
-  return `<div class="mm-grid">
-    <div class="mm-tree mm-tree-svg">
-      <div class="mm-head">${esc(t("minimapTree"))}</div>
-      <svg class="mm-svg" viewBox="0 0 320 ${layout.height}" preserveAspectRatio="xMinYMin meet" width="100%" height="${layout.height}px">
-        ${edgesSvg}
-        ${nodesSvg}
-        ${agentBadge}
-      </svg>
-      <div class="mm-other">${otherCount}</div>
-    </div>
-    <div class="mm-log">
-      <div class="mm-head">${esc(t("minimapLog"))} <span class="mm-count">${acts.length}</span></div>
-      <div class="mm-preview" id="mmPreview-${a.id}" hidden></div>
-      ${logHtml}
+  return `<div class="mm-wrap">
+    ${rosterHtml}
+    <div class="mm-grid">
+      <div class="mm-tree mm-tree-svg">
+        <div class="mm-head">${esc(t("minimapTree"))}</div>
+        <svg class="mm-svg" viewBox="0 0 320 ${layout.height}" preserveAspectRatio="xMinYMin meet" width="100%" height="${layout.height}px">
+          ${edgesSvg}
+          ${nodesSvg}
+          ${agentBadge}
+        </svg>
+        <div class="mm-other">${otherCount}</div>
+      </div>
+      <div class="mm-log">
+        <div class="mm-head">${esc(t("minimapLog"))} <span class="mm-count">${acts.length}</span></div>
+        <div class="mm-preview" id="mmPreview-${a.id}" hidden></div>
+        ${logHtml}
+      </div>
     </div>
   </div>`;
 }
@@ -375,6 +361,7 @@ const I18N = {
     popout: "🪟 별도 창", popoutTitle: "이 작업만 별도 창으로 분리해서 보기",
     tlPlay: "재생/일시정지", tlBack: "처음으로", tlLive: "라이브",
     minimapTab: "미니맵", paneSplit: "분할", paneSplitTitle: "콘솔과 미니맵을 좌/우로 동시에 보기", minimapTree: "📁 디렉토리(에이전트 활동)", minimapLog: "⏱ 활동 로그(최근 30)",
+    mmAgents: "🧑‍💼 에이전트", mmLead: "팀장", mmIdle: "대기 중…",
     minimapEmpty: "아직 도구 활동이 없어요. 작업이 시작되면 여기에 표시됩니다.",
     minimapNoFiles: "(아직 파일 접근 없음)",
     bootLoading: "준비 중…", bootRestoring: "이전 작업 복원 중…",
@@ -495,6 +482,7 @@ const I18N = {
     popout: "🪟 Pop out", popoutTitle: "Open this task in its own window",
     tlPlay: "Play/Pause", tlBack: "Rewind", tlLive: "LIVE",
     minimapTab: "Minimap", paneSplit: "Split", paneSplitTitle: "Show console and minimap side-by-side", minimapTree: "📁 Directory (agent activity)", minimapLog: "⏱ Recent activity (30)",
+    mmAgents: "🧑‍💼 Agents", mmLead: "Lead", mmIdle: "Idle…",
     minimapEmpty: "No tool activity yet. It'll appear here once the agent starts working.",
     minimapNoFiles: "(no file access yet)",
     bootLoading: "Loading…", bootRestoring: "Restoring previous tasks…",
@@ -561,6 +549,7 @@ I18N.ja = {
   boardTitle2: "📊 統合監視ボード", boardEmpty: "進行中のタスクはまだありません。",
   boardSummary: "{0}件 · 実行中 {1} · 完了 {2} · 確認 {3}",
   minimapTab: "ミニマップ", verifyTab: "検証",
+  mmAgents: "🧑‍💼 エージェント", mmLead: "リーダー", mmIdle: "待機中…",
   rpFiles: "Files", rpFilesTitle: "変更ファイルをディレクトリ別に", rpChanges: "Changes", rpChangesTitle: "差分 — 承認/コメント",
   rpReview: "Review", rpBranchTitle: "このタスクのブランチ / worktree",
   chApprove: "承認(保存)", chComment: "コメント", chCommentPh: "この差分への追加リクエスト…", chCommentHint: "💬 下の入力欄に変更リクエストを入力。",
@@ -1553,9 +1542,10 @@ function mate(tm, name){ const v = tm[name]; return typeof v === "string" ? { st
 // 오케스트레이터 → 전문가 호출관계 바
 function renderOrchBar(a){
   const tm = a.teammates; if (!tm || !Object.keys(tm).length) return "";
-  const chips = Object.keys(tm).map(name => {
-    const m = mate(tm, name);
-    return `<span class="orch-chip ${m.status}" title="${esc(name)}">${m.status === "done" ? "✓" : "●"} ${esc(expertLabel(name))}</span>`;
+  const chips = Object.keys(tm).map(key => {
+    const m = mate(tm, key);
+    const nm = m.name || key;
+    return `<span class="orch-chip ${m.status}" title="${esc(m.desc || nm)}">${m.status === "done" ? "✓" : "●"} ${esc(expertLabel(nm))}</span>`;
   }).join('<span class="orch-arrow">·</span>');
   return `<div class="orch-bar"><span class="orch-lead">${badgeOf("orchestrator").icon} ${esc(t("orchestrator"))}</span><span class="orch-to">→</span>${chips}</div>`;
 }
@@ -1665,8 +1655,9 @@ function renderRunMeta(a){
 
 function renderSubConsoles(a){
   const tm = a.teammates; if (!tm || !Object.keys(tm).length) return "";
-  const cards = Object.keys(tm).map(name => {
-    const m = mate(tm, name);
+  const cards = Object.keys(tm).map(key => {
+    const m = mate(tm, key);
+    const name = m.name || key;
     const cls = m.isError ? "error" : m.status;
     const headIcon = m.isError ? "✗ error" : (m.status === "done" ? "✓ done" : "● working");
     const dur = (m.startedAt && m.endedAt) ? fmtDuration(m.endedAt - m.startedAt)
@@ -1988,7 +1979,7 @@ function showMonitorBoard(){
         ${dur ? `<span>⏱ ${dur}</span>` : ""}
         ${a.tokens_in ? `<span>🔤 ${fmtTok((a.tokens_in||0)+(a.tokens_out||0))}</span>` : ""}
       </div>
-      ${subs.length ? `<div class="mb-subs">🧑‍💼 ${subs.length}명 위임 · ${subs.slice(0,4).map(n => `<span class="mb-sub-chip">${esc(expertLabel(n))}</span>`).join("")}${subs.length > 4 ? ` +${subs.length-4}` : ""}</div>` : ""}
+      ${subs.length ? `<div class="mb-subs">🧑‍💼 ${subs.length}명 위임 · ${subs.slice(0,4).map(k => `<span class="mb-sub-chip">${esc(expertLabel(mate(tm,k).name || k))}</span>`).join("")}${subs.length > 4 ? ` +${subs.length-4}` : ""}</div>` : ""}
       ${lastTool ? `<div class="mb-last" title="${esc(lastTool)}">${esc(lastTool)}</div>` : ""}
     </div>`;
   }).join("");
@@ -2639,11 +2630,14 @@ listen("agent_removed", (ev) => {
   render();
 });
 listen("teammate_update", (ev) => {
-  const { agentId, name, status, desc, result, isError, prompt, model, startedAt, endedAt } = ev.payload || {};
+  const { agentId, name, tuid, status, desc, result, isError, prompt, model, startedAt, endedAt } = ev.payload || {};
   const a = state.get(agentId); if (!a) return;
   a.teammates = a.teammates || {};
-  const prev = mate(a.teammates, name);
-  a.teammates[name] = {
+  // 키: tuid 우선(같은 전문가 타입 여러 명도 구분) → 없으면 name 폴백
+  const key = (tuid && String(tuid)) || name;
+  const prev = mate(a.teammates, key);
+  a.teammates[key] = {
+    name: name || prev.name || key,   // 표시용 이름(전문가 타입)
     status,
     desc: desc || prev.desc || "",
     result: result || prev.result || "",
