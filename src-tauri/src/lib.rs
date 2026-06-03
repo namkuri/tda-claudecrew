@@ -3,7 +3,7 @@
 // 자격증명을 만지거나 인증을 위조하지 않는다. 각 작업은 격리된 git worktree에서 실행.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
@@ -35,11 +35,20 @@ struct AgentInfo {
     #[serde(default)] started_at: Option<i64>, // 작업 시작(ms epoch) — 헤더 경과시간 표시용
 }
 
+// PTY 세션: label 별로 stdin writer + child handle 보관.
+// 본 앱은 claude REPL을 PTY로 띄워서 사용자가 /login 등의 슬래시 커맨드를 직접 칠 수 있게 함.
+struct PtySession {
+    writer: Mutex<Box<dyn std::io::Write + Send>>,
+    master: Mutex<Box<dyn portable_pty::MasterPty + Send>>,
+    child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
+}
+
 struct AppState {
     agents: Mutex<HashMap<String, AgentInfo>>,
     counter: Mutex<u32>,
     cost_cap: Mutex<f64>, // 0 이하 = 끔
     capped: Mutex<bool>,  // 상한 도달 알림을 한 번만 보내기 위한 플래그
+    ptys: Mutex<HashMap<String, std::sync::Arc<PtySession>>>,
 }
 
 impl Default for AppState {
@@ -49,6 +58,7 @@ impl Default for AppState {
             counter: Mutex::new(0),
             cost_cap: Mutex::new(5.0),
             capped: Mutex::new(false),
+            ptys: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -366,6 +376,107 @@ fn verify_claude_auth() -> Result<String, String> {
     }
     // 오래된 mtime — 일단 존재한다고 통과
     Ok("자격증명 파일 확인됨".into())
+}
+
+// ---------------- PTY 통합 ----------------
+// label별로 1개의 PTY 세션을 운영. UI(xterm.js)가 pty_data 이벤트로 출력 받고
+// pty_write/pty_resize/pty_close 커맨드로 입력·크기·종료를 제어.
+// 보안: 새 자격증명을 만들지 않음. claude REPL 안에서 /login을 사용자가 직접 침.
+#[tauri::command]
+fn pty_open(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    label: String,
+    cwd: Option<String>,
+    cmd: Option<String>,
+    args: Option<Vec<String>>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+) -> Result<(), String> {
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+    // 이미 같은 label이 살아 있으면 중복 생성 금지(혹시 끊긴 거면 close 후 다시).
+    if state.ptys.lock().unwrap().contains_key(&label) {
+        return Err(format!("PTY 세션 이미 열림: {label} — 먼저 pty_close 후 재시도"));
+    }
+    let pty_system = native_pty_system();
+    let size = PtySize { rows: rows.unwrap_or(28), cols: cols.unwrap_or(110), pixel_width: 0, pixel_height: 0 };
+    let pair = pty_system.openpty(size).map_err(|e| format!("openpty 실패: {e}"))?;
+
+    // 실행할 명령 결정 — 기본은 claude REPL
+    let cmd_str = cmd.unwrap_or_else(|| {
+        #[cfg(windows)]
+        { resolve_claude_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "claude".into()) }
+        #[cfg(not(windows))]
+        { "claude".into() }
+    });
+    let mut builder = CommandBuilder::new(&cmd_str);
+    if let Some(a) = args { for x in a { builder.arg(x); } }
+    if let Some(d) = cwd.filter(|s| !s.is_empty()) { builder.cwd(d); }
+    // 환경변수 일부 유지 — HOME/USERPROFILE 등. portable-pty가 기본으로 inherit.
+
+    let child = pair.slave.spawn_command(builder).map_err(|e| format!("spawn 실패: {e}"))?;
+    drop(pair.slave); // slave는 child가 보유
+
+    let writer = pair.master.take_writer().map_err(|e| format!("writer 획득 실패: {e}"))?;
+    let session = std::sync::Arc::new(PtySession {
+        writer: Mutex::new(writer),
+        master: Mutex::new(pair.master),
+        child: Mutex::new(child),
+    });
+    state.ptys.lock().unwrap().insert(label.clone(), session.clone());
+
+    // 백그라운드 reader 스레드 — master에서 읽어 UI로 emit
+    let app_for_reader = app.clone();
+    let label_for_reader = label.clone();
+    let session_for_reader = session.clone();
+    std::thread::spawn(move || {
+        let mut reader = match session_for_reader.master.lock().unwrap().try_clone_reader() {
+            Ok(r) => r,
+            Err(e) => { let _ = app_for_reader.emit("pty_data", serde_json::json!({"label":label_for_reader,"data":format!("[reader 실패: {e}]\r\n")})); return; }
+        };
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break, // EOF
+                Ok(n) => {
+                    let s = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let _ = app_for_reader.emit("pty_data", serde_json::json!({"label": label_for_reader, "data": s}));
+                }
+                Err(_) => break,
+            }
+        }
+        let _ = app_for_reader.emit("pty_exit", serde_json::json!({"label": label_for_reader}));
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn pty_write(state: tauri::State<'_, AppState>, label: String, data: String) -> Result<(), String> {
+    let map = state.ptys.lock().unwrap();
+    let s = map.get(&label).ok_or_else(|| format!("PTY 세션 없음: {label}"))?;
+    let mut w = s.writer.lock().unwrap();
+    w.write_all(data.as_bytes()).map_err(|e| format!("write 실패: {e}"))?;
+    w.flush().ok();
+    Ok(())
+}
+
+#[tauri::command]
+fn pty_resize(state: tauri::State<'_, AppState>, label: String, cols: u16, rows: u16) -> Result<(), String> {
+    let map = state.ptys.lock().unwrap();
+    let s = map.get(&label).ok_or_else(|| format!("PTY 세션 없음: {label}"))?;
+    let m = s.master.lock().unwrap();
+    m.resize(portable_pty::PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+        .map_err(|e| format!("resize 실패: {e}"))
+}
+
+#[tauri::command]
+fn pty_close(state: tauri::State<'_, AppState>, label: String) -> Result<(), String> {
+    let s = state.ptys.lock().unwrap().remove(&label);
+    if let Some(s) = s {
+        // 자식에게 kill 시도(실패해도 무시 — 이미 죽었을 수 있음)
+        let _ = s.child.lock().unwrap().kill();
+    }
+    Ok(())
 }
 
 // ---------------- 커맨드: 온보딩 환경 설정 ----------------
@@ -1975,7 +2086,11 @@ pub fn run() {
             get_timeline,
             load_agent_output,
             open_login_terminal,
-            verify_claude_auth
+            verify_claude_auth,
+            pty_open,
+            pty_write,
+            pty_resize,
+            pty_close
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,6 +1,6 @@
 [package]
 name = "claudecrew"
-version = "0.20.0"
+version = "0.21.0"
 description = "ClaudeCrew — 누구나 쓰는 Claude 에이전트 오케스트레이션"
 authors = ["you"]
 edition = "2021"
@@ -20,6 +20,8 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# PTY 통합 — Windows ConPTY / Unix pty 모두 지원. claude REPL을 앱 안에서 양방향으로 운용.
+portable-pty = "0.8"
 
 [profile.release]
 panic = "abort"

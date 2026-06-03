@@ -157,6 +157,12 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **비동기 enterApp**: `check_claude`/`get_cost_cap`/`check_api_mode`/`loadAgents`/`refreshUsage`를 `Promise.allSettled`로 병렬. 화면이 즉시 응답하고 컴포저 입력 가능. 우상단에 떠다니는 **부트 토스트**(스피너 + "준비 중…"/"이전 작업 복원 중…"). 완료 자동 숨김.
   - **detached 양방향**: 별도 창에서 보던 작업이 메인에서 `agent_removed`로 제거되면 친화 메시지 "⚠ 이 작업이 메인에서 제거되었어요. 창을 닫아도 좋아요."
   - **분할 패널 모드**: 메인 콘솔 헤더에 **⊟ 분할** 탭 추가 — 콘솔(좌)과 미니맵(우) 동시 표시. `cc_pane_<id>` localStorage 영속화. 좁은 창에서는 자동 상하 분할.
+- **PTY/xterm.js 내장 + 온보딩 자동 진행(v0.21.0)**:
+  - **portable-pty 백엔드**: `pty_open(label,cwd,cmd,args,cols,rows)` / `pty_write` / `pty_resize` / `pty_close` 커맨드. 스레드가 master에서 읽어 `emit("pty_data")`. ConPTY(Windows)/Unix pty 모두 지원.
+  - **xterm.js 내장 터미널**: `ui/vendor/xterm.js + xterm-addon-fit + xterm.css` 로컬 번들. 우측 패널 4번째 탭 `🖥 터미널` — claude REPL을 앱 안에서 직접. /login 같은 슬래시 커맨드도 OK.
+  - **터미널 마운트 자동 흐름**: 탭 클릭 → `mountPty("main")` → `Terminal` + `FitAddon` 생성 → 백엔드 `pty_open(cwd=worktree)` → 양방향 통신. 창 크기 변경 시 `fit()` + `pty_resize`.
+  - **온보딩 자동 진행**: 한 번이라도 시작한 사용자(`cc_skipOnboarding=1` + `cc_repo` 존재)는 즉시 메인 화면. check/setup은 백그라운드.
+  - **헤더 폴더 칩 + 변경 버튼**: 사이드바 폴더명 옆 ⚙ 버튼·이름 클릭 둘 다 폴더 변경 다이얼로그. 토스트로 변경 알림.
 - **미니맵 path 애니메이션 + 서브에이전트 상세(v0.20.0)**:
   - **에이전트 path 애니메이션**: 마지막 12개 활동의 노드 좌표를 시퀀스화 → SMIL `animateTransform` keyTimes/keySplines로 부드러운 보간(spline 0.4 0 0.6 1). 활동 하나당 ≈0.7s, 무한 반복. 진짜로 "노드 사이를 돌아다니는" 시각.
   - **서브에이전트 통계 띠**: result 텍스트 분석 — 코드 블록(```\``\``\``), 파일 언급(확장자 패턴), 명령(`$` 또는 ```bash), 글자/줄 수. 코랄 칩으로 표시. 툴팁에 "SDK 한계로 추정치" 안내.

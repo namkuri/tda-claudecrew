@@ -270,6 +270,8 @@ const I18N = {
     reloginVerifyFail: "아직 자격증명 파일을 못 찾았어요. 2단계 /login을 마쳐주세요.",
     sub_result_more: "전체 결과 보기",
     sub_stats_hint: "결과 텍스트에서 추정한 활동 — 서브에이전트 내부 도구 호출은 SDK가 노출하지 않습니다.",
+    termTab: "터미널", termTabTitle: "claude REPL을 앱 안에서 직접 — /login 같은 슬래시 커맨드도 OK",
+    folderChanged: "📂 폴더 변경 완료",
     demoBadge: "🖥️ 데모 모드 — 화면 미리보기예요. 실제 작업(파일 수정·저장)은 데스크톱 앱에서 동작해요.",
     demoCheck: "데모 모드 (브라우저 미리보기)", demoSetup: "데모: 실제 설치는 데스크톱 앱에서 진행됩니다.", demoCommit: "데모: 실제 저장(commit)은 데스크톱 앱에서 됩니다.",
     rfNeedName: "이름과 부탁 문구를 적어주세요.", rfSaved: "레시피를 저장했어요.", rfDeleted: "레시피를 삭제했어요.",
@@ -376,6 +378,8 @@ const I18N = {
     reloginVerifyFail: "Credentials file not yet present. Please complete /login first.",
     sub_result_more: "Show full result",
     sub_stats_hint: "Estimated from the result text — actual sub-agent tool calls are not exposed by the SDK.",
+    termTab: "Terminal", termTabTitle: "Embedded claude REPL — type /login or any slash command",
+    folderChanged: "📂 Folder changed",
     demoBadge: "🖥️ Demo mode — this is a UI preview. Real work (editing/saving files) runs in the desktop app.",
     demoCheck: "Demo mode (browser preview)", demoSetup: "Demo: real install happens in the desktop app.", demoCommit: "Demo: real saving (commit) happens in the desktop app.",
     rfNeedName: "Please enter a name and request text.", rfSaved: "Recipe saved.", rfDeleted: "Recipe deleted.",
@@ -461,6 +465,8 @@ I18N.ja = {
   reloginVerifyFail: "認証ファイルがまだありません。/login を完了してください。",
   sub_result_more: "完全な結果を表示",
   sub_stats_hint: "結果テキストから推定 — 内部ツール呼び出しは SDK が非公開。",
+  termTab: "ターミナル", termTabTitle: "claude REPL を内蔵 — /login など直接入力可",
+  folderChanged: "📂 フォルダ変更完了",
   minimapTab: "ミニマップ", verifyTab: "検証",
   tlPlay: "再生/一時停止", tlBack: "最初へ", tlLive: "ライブ",
   popout: "🪟 別ウィンドウ",
@@ -565,6 +571,17 @@ function makeDemoApi(){
       }
       case "open_login_terminal": console.log("[demo] open_login_terminal"); return Promise.resolve();
       case "verify_claude_auth":  return Promise.resolve("demo: 자격증명 확인됨");
+      case "pty_open": {
+        // 데모: 가짜 출력 한 줄
+        setTimeout(() => emit("pty_data", { label: args.label, data: "[demo] PTY 미지원 — 데스크톱 앱에서만 동작.\r\n$ " }), 50);
+        return Promise.resolve();
+      }
+      case "pty_write": {
+        // 입력 한 글자 echo
+        setTimeout(() => emit("pty_data", { label: args.label, data: args.data }), 5);
+        return Promise.resolve();
+      }
+      case "pty_resize": case "pty_close": return Promise.resolve();
       case "verify_changes":    return Promise.resolve({ ran:true, success:true, note:"감지됨: Node", steps:[
         { name:"npm", command:"npm run build", success:true, stdout:"built", stderr:"" },
         { name:"npm", command:"npm test", success:true, stdout:"3 passed", stderr:"" },
@@ -914,6 +931,20 @@ $("#btnFolder").addEventListener("click", async () => {
   if (picked) { repoPath = picked; folderOk = true; localStorage.setItem("cc_repo", repoPath); refreshWizard(); }
 });
 
+// 헤더의 폴더 변경 — 메인 화면에서도 즉시 변경 가능
+async function changeFolderInline(){
+  try {
+    const picked = await dialog.open({ directory: true, multiple: false, title: t("pickFolderTitle") });
+    if (picked) {
+      repoPath = picked; localStorage.setItem("cc_repo", repoPath);
+      $("#repoName").textContent = repoBaseName();
+      showToast(t("folderChanged") || ("📂 폴더 변경됨: " + repoBaseName()), "info", 3000);
+    }
+  } catch (e) { showToast(String(e), "err", 4000); }
+}
+document.getElementById("btnChangeFolder")?.addEventListener("click", changeFolderInline);
+document.getElementById("repoName")?.addEventListener("click", changeFolderInline);
+
 $("#btnSetup").addEventListener("click", async () => {
   $("#setupStatus").textContent = t("installing"); $("#setupStatus").className = "status";
   try {
@@ -928,6 +959,7 @@ $("#btnSetup").addEventListener("click", async () => {
 });
 
 $("#btnStart").addEventListener("click", () => {
+  localStorage.setItem("cc_skipOnboarding", "1");
   $("#onboarding").classList.add("hidden");
   $("#app").classList.remove("hidden");
   enterApp();
@@ -1929,6 +1961,7 @@ function rightTabsHtml(){
     <button class="rp-tab ${rightPanel === "git" ? "on" : ""}" data-rp="git" title="Git 변경/커밋">🌿 Git</button>
     <button class="rp-tab ${rightPanel === "minimap" ? "on" : ""}" data-rp="minimap" title="에이전트 활동 미니맵">🗺 ${esc(t("minimapTab"))}</button>
     <button class="rp-tab ${rightPanel === "verify" ? "on" : ""}" data-rp="verify" title="자동 검증 결과">🧪 ${esc(t("verifyTab"))}</button>
+    <button class="rp-tab ${rightPanel === "terminal" ? "on" : ""}" data-rp="terminal" title="${esc(t("termTabTitle"))}">🖥 ${esc(t("termTab"))}</button>
   </div>`;
 }
 function bindRightTabs(){
@@ -1951,6 +1984,13 @@ function renderGit(){
     gp.innerHTML = _dockCtrlHtml + rightTabsHtml() +
       `<div class="rp-body">${renderMinimap(_aFor)}</div>`;
     bindGitDock(); bindRightTabs();
+    return;
+  }
+  if (rightPanel === "terminal"){
+    gp.innerHTML = _dockCtrlHtml + rightTabsHtml() +
+      `<div class="rp-body" id="rpTerminalBody"><div id="ptyMount" class="pty-mount"></div></div>`;
+    bindGitDock(); bindRightTabs();
+    setTimeout(() => mountPty("main"), 30);
     return;
   }
   if (rightPanel === "verify"){
@@ -2175,10 +2215,75 @@ if (DEMO) {
 }
 applyI18n();
 bindGitDock();
+
+// ---------- PTY/xterm 통합 ----------
+// label별 1개 xterm 인스턴스. 우측 탭이 '터미널'일 때만 마운트. 처음 마운트 시 백엔드 pty_open + listen("pty_data").
+const _ptyMounts = {}; // label -> {term, fitAddon, mounted}
+function mountPty(label){
+  const host = document.getElementById("ptyMount");
+  if (!host) return;
+  if (!window.Terminal) {
+    host.innerHTML = `<div class="pty-error">xterm.js가 로드되지 않았어요 (vendor/xterm.js)</div>`;
+    return;
+  }
+  let m = _ptyMounts[label];
+  if (m && m.host === host) { m.fitAddon.fit(); return; }
+  // 새 인스턴스
+  const term = new window.Terminal({
+    fontFamily: 'ui-monospace, Menlo, Consolas, "Courier New", monospace',
+    fontSize: 12.5,
+    theme: { background: "#0b0e11", foreground: "#cfd6dd", cursor: "#e89467", selectionBackground: "rgba(232,148,103,.3)" },
+    cursorBlink: true,
+    convertEol: true,
+  });
+  let fitAddon = null;
+  try { fitAddon = new window.FitAddon.FitAddon(); term.loadAddon(fitAddon); } catch(_) {}
+  term.open(host);
+  if (fitAddon) fitAddon.fit();
+  _ptyMounts[label] = { term, fitAddon, host };
+  // 키 입력 → 백엔드 pty_write
+  term.onData((data) => {
+    invoke("pty_write", { label, data }).catch(e => term.write(`\r\n[write 실패: ${e}]\r\n`));
+  });
+  // 크기 변경 → pty_resize
+  const sendSize = () => {
+    if (!fitAddon) return;
+    fitAddon.fit();
+    invoke("pty_resize", { label, cols: term.cols, rows: term.rows }).catch(()=>{});
+  };
+  setTimeout(sendSize, 100);
+  window.addEventListener("resize", sendSize);
+  // 백엔드 PTY 열기 (cwd = 현재 작업의 worktree, 없으면 기본)
+  const cwd = (selectedId && state.get(selectedId)?.worktree) || repoPath || "";
+  invoke("pty_open", { label, cwd, cmd: null, args: null, cols: term.cols, rows: term.rows })
+    .then(() => term.write(`\x1b[36m✓ claude REPL 시작 — /login 등 슬래시 커맨드를 직접 입력하세요.\x1b[0m\r\n`))
+    .catch(e => term.write(`\x1b[31m[pty_open 실패]\x1b[0m ${e}\r\n→ portable-pty 빌드 또는 claude 경로 확인\r\n`));
+}
+// 백엔드에서 들어오는 출력
+listen("pty_data", (ev) => {
+  const { label, data } = ev.payload || {};
+  const m = _ptyMounts[label]; if (!m) return;
+  m.term.write(data);
+});
+listen("pty_exit", (ev) => {
+  const { label } = ev.payload || {};
+  const m = _ptyMounts[label]; if (!m) return;
+  m.term.write("\r\n\x1b[33m[세션이 종료되었습니다]\x1b[0m\r\n");
+});
+
 if (DETACHED && DETACHED_ID) {
   // detached: 온보딩 단계 우회. 메인 창에서 만든 작업 상태가 emit 으로 전파됨.
   $("#onboarding").classList.add("hidden");
   $("#app").classList.remove("hidden");
+  enterApp();
+} else if (localStorage.getItem("cc_skipOnboarding") === "1" && localStorage.getItem("cc_repo")) {
+  // 한 번이라도 온보딩을 완료한 사용자는 즉시 메인. check/setup은 백그라운드로.
+  repoPath = localStorage.getItem("cc_repo");
+  $("#onboarding").classList.add("hidden");
+  $("#app").classList.remove("hidden");
+  // 백그라운드 진단
+  invoke("check_claude").then(v => { checkedOk = true; }).catch(()=>{});
+  folderOk = true; setupOk = true;
   enterApp();
 } else {
   refreshWizard();

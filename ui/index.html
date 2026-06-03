@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>ClaudeCrew</title>
 <link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="vendor/xterm.css" />
 </head>
 <body>
 
@@ -80,7 +81,8 @@
 
     <div class="repo-group">
       <div class="repo-head">
-        <span class="repo-name" id="repoName" data-i18n="noFolder">폴더 없음</span>
+        <span class="repo-name" id="repoName" data-i18n="noFolder" title="폴더 변경" style="cursor:pointer">폴더 없음</span>
+        <button class="repo-change" id="btnChangeFolder" data-i18n-title="changeFolder" title="폴더 변경">⚙</button>
         <span class="repo-count" id="repoCount">0</span>
       </div>
       <div class="ws-row base" id="wsBase" title="기준 브랜치"><span class="ws-br">⎇</span><span class="ws-title">main</span></div>
@@ -220,6 +222,8 @@
   </div>
 </div>
 
+<script src="vendor/xterm.js"></script>
+<script src="vendor/xterm-addon-fit.js"></script>
 <script src="main.js"></script>
 </body>
 </html>
