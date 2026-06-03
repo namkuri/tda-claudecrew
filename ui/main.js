@@ -297,6 +297,7 @@ function applyI18n(){
   const lb = $("#btnLang"); if (lb) lb.textContent = lang === "ko" ? "EN" : "한국어";
   if ($("#repoName")) $("#repoName").textContent = repoBaseName();
   syncPrettyBtn();
+  applyGitDock();
   renderCustomRecipes();
   render();
   const badge = document.querySelector(".demo-badge"); if (badge) badge.textContent = t("demoBadge");
@@ -413,6 +414,7 @@ let selectedId = null;          // 현재 선택된 작업(null = 새 작업/컴
 const openTabs = [];            // 열린 탭(작업 id 순서)
 let authMode = localStorage.getItem("cc_authmode") || "subscription"; // subscription(앱 플랜) | api
 let pretty = localStorage.getItem("cc_pretty") === "1"; // Pretty 모드(콘솔 그룹 접힘 + Markdown)
+let gitDock = localStorage.getItem("cc_gitDock") || "right"; // right(기본) | bottom | hidden
 let baseBranch = "main"; // 저장소의 기본/기준 브랜치 — 작업 선택 시 백엔드가 검출해 채움
 
 function repoBaseName(){
@@ -607,6 +609,55 @@ $("#btnPretty").addEventListener("click", () => {
 function syncPrettyBtn(){
   const b = $("#btnPretty"); if (!b) return;
   b.classList.toggle("on", !!pretty);
+}
+
+// Git 패널 도킹 — right / bottom / hidden
+function applyGitDock(){
+  const cls = document.documentElement.classList;
+  cls.remove("dock-right", "dock-bottom", "dock-hidden");
+  cls.add("dock-" + gitDock);
+  localStorage.setItem("cc_gitDock", gitDock);
+  // 도킹 컨트롤 활성 표시
+  document.querySelectorAll(".dock-ctrl button").forEach(b => b.classList.toggle("on", b.dataset.dock === gitDock));
+  // 사이드바 'Git 다시 열기' 버튼
+  const reopen = $("#btnReopenGit");
+  if (reopen) reopen.classList.toggle("hidden", gitDock !== "hidden");
+}
+function setGitDock(v){ gitDock = v; applyGitDock(); }
+
+// 도킹 컨트롤 버튼들 + 드래그(HTML5)
+function bindGitDock(){
+  document.querySelectorAll("#gpDockCtrl button").forEach(b => {
+    b.onclick = (e) => { e.stopPropagation(); setGitDock(b.dataset.dock); };
+  });
+  const ctrl = $("#gpDockCtrl");
+  if (ctrl){
+    const dzR = $("#dzRight"), dzB = $("#dzBottom");
+    ctrl.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("text/plain", "gitpanel");
+      ctrl.classList.add("dragging");
+      setTimeout(() => { dzR.classList.add("shown"); dzB.classList.add("shown"); }, 0);
+    });
+    ctrl.addEventListener("dragend", () => {
+      ctrl.classList.remove("dragging");
+      dzR.classList.remove("shown"); dzB.classList.remove("shown");
+    });
+    [dzR, dzB].forEach(dz => {
+      dz.addEventListener("dragover", (e) => { e.preventDefault(); });
+      dz.addEventListener("drop", (e) => {
+        e.preventDefault();
+        setGitDock(dz.id === "dzRight" ? "right" : "bottom");
+        dzR.classList.remove("shown"); dzB.classList.remove("shown");
+      });
+    });
+    // 드롭존을 가시화하기 위해 메인에서도 dragover 받기
+    document.body.addEventListener("dragover", (e) => {
+      if (!ctrl.classList.contains("dragging")) return;
+      e.preventDefault();
+    });
+  }
+  const reopen = $("#btnReopenGit");
+  if (reopen) reopen.onclick = () => setGitDock("right");
 }
 
 $("#btnLang").addEventListener("click", () => {
@@ -1379,14 +1430,23 @@ function renderAgentView(a){
   });
 }
 
+const _dockCtrlHtml = `<div class="dock-ctrl" id="gpDockCtrl" draggable="true" title="끌어다 놓거나 버튼으로 위치를 바꿔요">
+    <button data-dock="right" title="우측 도킹">→</button>
+    <button data-dock="bottom" title="하단 도킹">↓</button>
+    <button data-dock="hidden" title="숨김">✕</button>
+  </div>`;
 function renderGit(){
   const gp = $("#gitpanel"); if (!gp) return;
-  if (!(selectedId && state.has(selectedId))){ gp.innerHTML = `<div class="gp-empty">${t("gpEmpty")}</div>`; return; }
+  if (!(selectedId && state.has(selectedId))){
+    gp.innerHTML = _dockCtrlHtml + `<div class="gp-empty">${t("gpEmpty")}</div>`;
+    bindGitDock();
+    return;
+  }
   const a = state.get(selectedId); const st = a._stat;
   const filesHtml = st && st.files && st.files.length
     ? st.files.map(f => `<div class="gp-file" data-fdiff="1"><span class="fn">${esc(f.name)}</span><span class="fst"><span class="gp-add">+${f.adds}</span><span class="gp-del">-${f.dels}</span></span></div>`).join("")
     : `<div class="gp-empty" style="padding:4px 6px">${t("gpNoChange")}</div>`;
-  gp.innerHTML =
+  gp.innerHTML = _dockCtrlHtml +
     `<div class="gp-head">${t("gpBase")}: <b>${esc(baseBranch)}</b> · #${shortId(a.id)}</div>
      <div class="gp-sec">
        <h4 title="${esc(t("wtTitle"))}">${t("wtPath")}</h4>
@@ -1408,6 +1468,7 @@ function renderGit(){
     catch (e) { alert(t("saveFail") + e); }
   };
   gp.querySelectorAll('[data-fdiff]').forEach(el => el.onclick = () => viewDiff(a.id));
+  bindGitDock();
 }
 
 // 사이드바/탭 클릭(이벤트 위임) + 새 작업
@@ -1562,6 +1623,7 @@ if (DEMO) {
   document.body.appendChild(d);
 }
 applyI18n();
+bindGitDock();
 if (DETACHED && DETACHED_ID) {
   // detached: 온보딩 단계 우회. 메인 창에서 만든 작업 상태가 emit 으로 전파됨.
   $("#onboarding").classList.add("hidden");

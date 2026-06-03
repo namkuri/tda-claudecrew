@@ -121,20 +121,49 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .form-acts{display:flex;gap:10px;margin-top:4px}
 .form-acts .btn{flex:none} #rfDelete{color:var(--err);border-color:var(--err)}
 
-/* ============ Superset식 3-컬럼 워크스테이션 ============ */
+/* ============ Superset식 3-컬럼 워크스테이션 + 도킹(Phase 2) ============ */
+/* 기본: dock-right (Git 패널이 우측). dock-bottom / dock-hidden 으로 변경 가능 */
 #app{height:100vh;display:grid;grid-template-columns:266px 1fr 340px;grid-template-rows:minmax(0,1fr) auto auto;overflow:hidden}
+.sidebar{grid-row:1;grid-column:1}
+.center{grid-row:1;grid-column:2}
+.gitpanel{grid-row:1;grid-column:3;position:relative}
+#costBanner{grid-row:2;grid-column:1/-1}
+.statusbar{grid-row:3;grid-column:1/-1}
 
-/* detached 모드 — 단일 작업 풀스크린: 사이드바·Git 패널·탭바 숨김 */
+/* Git 패널: 하단 도킹 */
+.dock-bottom #app{grid-template-columns:266px 1fr;grid-template-rows:minmax(0,1fr) minmax(180px,32vh) auto auto}
+.dock-bottom .sidebar{grid-row:1/3;grid-column:1}
+.dock-bottom .center{grid-row:1;grid-column:2}
+.dock-bottom .gitpanel{grid-row:2;grid-column:2;border-left:none;border-top:1px solid var(--line)}
+.dock-bottom #costBanner{grid-row:3} .dock-bottom .statusbar{grid-row:4}
+
+/* Git 패널: 숨김(접힘) */
+.dock-hidden #app{grid-template-columns:266px 1fr}
+.dock-hidden .gitpanel{display:none}
+
+/* detached 모드 — 단일 작업 풀스크린 */
 .detached #app{grid-template-columns:1fr}
 .detached .sidebar,.detached .gitpanel,.detached .agent-tabs{display:none!important}
 .detached .center{grid-column:1/-1}
 .detached #onboarding{display:none!important}
 .detached-body{background:var(--bg)}
-.sidebar{grid-row:1;grid-column:1}
-.center{grid-row:1;grid-column:2}
-.gitpanel{grid-row:1;grid-column:3}
-#costBanner{grid-row:2;grid-column:1/-1}
-.statusbar{grid-row:3;grid-column:1/-1}
+
+/* 패널 컨트롤 도킹 메뉴 — 우상단 작은 버튼들 */
+.dock-ctrl{position:absolute;top:8px;right:10px;display:flex;gap:3px;z-index:6;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:2px;cursor:grab}
+.dock-ctrl.dragging{opacity:.5;cursor:grabbing}
+.dock-ctrl button{background:transparent;border:none;color:var(--faint);font-size:11px;cursor:pointer;padding:3px 7px;border-radius:4px;line-height:1;font-family:var(--font)}
+.dock-ctrl button:hover{background:var(--panel2);color:var(--ink)}
+.dock-ctrl button.on{background:var(--accent);color:#06231d;font-weight:700}
+
+/* 드래그 도킹: drop zone hint */
+.dz{position:fixed;background:rgba(94,230,197,.18);border:2px dashed var(--accent);z-index:50;border-radius:8px;display:none;pointer-events:none}
+.dz.shown{display:block}
+.dz.right{top:0;right:0;width:340px;height:100vh}
+.dz.bottom{left:266px;right:0;bottom:0;height:32vh}
+.dock-hidden .dz.right{display:none}
+
+/* 사이드바의 'Git 패널 다시 열기' 버튼 */
+.btn-reopen-git{background:var(--accent);color:#06231d;border:none;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;font-weight:700}
 
 /* 좌: 워크스페이스 사이드바 */
 .sidebar{display:flex;flex-direction:column;border-right:1px solid var(--line);background:var(--panel);min-height:0}

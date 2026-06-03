@@ -89,6 +89,7 @@
     <div class="side-foot">
       <button class="btn go sm" id="btnNew" data-i18n="newTask">＋ 새 작업</button>
       <button class="chip" id="btnChangeFolder" data-i18n="changeFolder">폴더 변경</button>
+      <button class="btn-reopen-git hidden" id="btnReopenGit" title="Git 패널을 다시 표시">↩ Git</button>
     </div>
   </aside>
 
@@ -149,6 +150,10 @@
   <aside class="gitpanel" id="gitpanel">
     <div class="gp-empty" data-i18n="gpEmpty">작업을 선택하면 변경/커밋 상태가 여기에 보여요.</div>
   </aside>
+
+  <!-- 드래그 시 드롭존 표시(고정 오버레이) -->
+  <div class="dz right" id="dzRight"></div>
+  <div class="dz bottom" id="dzBottom"></div>
 
   <div id="costBanner" class="banner hidden"></div>
 

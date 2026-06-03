@@ -146,8 +146,12 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **시간축↔미니맵 연동**: 슬라이더로 과거 시점 이동 시 미니맵도 그 시점까지의 활동만 표시(scrub→`_aForRender.output` 슬라이스→미니맵 재계산).
   - 데모 검증: 트리 `src/login.js`(Read+Edit ×2), 기타 `🔍1 🔎0 💻1`, 슬라이더 3으로 이동 시 트리 비어짐.
 
-- **다음 회차 — Phase 2 of 3-1**:
-  - **P2 도킹/탭 드래그**: 패널 시스템(콘솔/Git/검증/미니맵) + 드래그 도킹 + LocalStorage 영속화. 현재 미니맵·검증·콘솔이 모두 패널화되어 있어 P2가 이를 자유 배치하게 만드는 단계.
+- **P2 패널 도킹(v0.13.0 — Phase 2 of 3-1 완료)**:
+  - **Git 패널 도킹 시스템**: 우측(기본) / 하단 / 숨김 3가지. `html.dock-right|dock-bottom|dock-hidden` 클래스로 CSS Grid 영역 동적 변경(`grid-template-rows/columns` 변경 + `grid-row/column` 재배치).
+  - **컨트롤 UI**: Git 패널 우상단 도킹 컨트롤(→/↓/✕) — 클릭으로 즉시 토글, **HTML5 드래그**로 우측/하단 드롭존(`.dz`)에 끌어다 놓기. 드래그 시 청록색 점선 하이라이트.
+  - **상태 영속화**: `cc_gitDock` LocalStorage. 앱 재시작 후에도 사용자가 선택한 위치 유지.
+  - **사이드바 ↩ Git 재오픈 버튼**: 숨김 모드일 때만 등장, 클릭 시 우측 복귀.
+  - 데모 검증: 기본 right → bottom → hidden(display:none + 재오픈 버튼 등장) → right 복귀, localStorage 동기화 확인.
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.

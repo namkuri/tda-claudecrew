@@ -1,6 +1,6 @@
 {
   "name": "claudecrew",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "ClaudeCrew 전문가·스킬·훅·MCP를 한 번에 설치하는 Claude Code 플러그인. 일반인이 AI 전문가 팀에게 안전하게 일을 맡기도록 구성한다.",
   "author": "ClaudeCrew",
   "agents": "./agents",
