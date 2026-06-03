@@ -157,6 +157,9 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **비동기 enterApp**: `check_claude`/`get_cost_cap`/`check_api_mode`/`loadAgents`/`refreshUsage`를 `Promise.allSettled`로 병렬. 화면이 즉시 응답하고 컴포저 입력 가능. 우상단에 떠다니는 **부트 토스트**(스피너 + "준비 중…"/"이전 작업 복원 중…"). 완료 자동 숨김.
   - **detached 양방향**: 별도 창에서 보던 작업이 메인에서 `agent_removed`로 제거되면 친화 메시지 "⚠ 이 작업이 메인에서 제거되었어요. 창을 닫아도 좋아요."
   - **분할 패널 모드**: 메인 콘솔 헤더에 **⊟ 분할** 탭 추가 — 콘솔(좌)과 미니맵(우) 동시 표시. `cc_pane_<id>` localStorage 영속화. 좁은 창에서는 자동 상하 분할.
+- **패널 리사이저 + 미니맵 다이어트(v0.19.0)**:
+  - **컬럼 리사이저**: 좌(사이드바)-중(콘솔)-우(패널) 사이 5px grip bar 2개(좌/우). 드래그=폭 조절, 더블클릭=리셋. `cc_colL/cc_colR` localStorage. 클램프 좌180~520 / 우220~640.
+  - **미니맵 다이어트**: SVG 노드 테두리(stroke) 제거 → 마지막 활동 노드만 `rgba(232,148,103,.10)` 살짝 강조 + drop-shadow 펄스. 행간 NODE_H 26→20, GAP_Y 8→2, INDENT 22→18. 200줄 활동 미니맵이 한 화면에 더 많이 들어옴.
 - **앱 내 재로그인 도우미(v0.18.0)**:
   - **`open_login_terminal` 커맨드**: Windows `cmd /K claude` 새 콘솔 / macOS `osascript Terminal.app` / Linux `x-terminal-emulator → gnome-terminal → konsole → xterm` 폴백. 새 창에 Claude REPL 띄워 사용자가 `/login` 직접 입력 → 브라우저 OAuth 자동.
   - **`verify_claude_auth` 커맨드**: `~/.claude/.credentials.json` 존재/mtime 확인. 키를 우리가 받지 않음(안전 원칙).

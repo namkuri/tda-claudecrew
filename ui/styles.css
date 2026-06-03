@@ -123,27 +123,33 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 
 /* ============ Superset식 3-컬럼 워크스테이션 + 도킹(Phase 2) ============ */
 /* 기본: dock-right (Git 패널이 우측). dock-bottom / dock-hidden 으로 변경 가능 */
-#app{height:100vh;display:grid;grid-template-columns:266px 1fr 340px;grid-template-rows:minmax(0,1fr) auto auto;overflow:hidden}
+#app{height:100vh;display:grid;grid-template-columns:var(--col-left,266px) 5px 1fr 5px var(--col-right,340px);grid-template-rows:minmax(0,1fr) auto auto;overflow:hidden}
 .sidebar{grid-row:1;grid-column:1}
-.center{grid-row:1;grid-column:2}
-.gitpanel{grid-row:1;grid-column:3;position:relative}
+.col-resize{grid-row:1;background:transparent;cursor:col-resize;position:relative;z-index:5}
+.col-resize:hover,.col-resize.dragging{background:var(--claude)}
+.col-resize::before{content:"";position:absolute;inset:0;left:-2px;right:-2px}
+#resizerL{grid-column:2}
+.center{grid-row:1;grid-column:3}
+#resizerR{grid-column:4}
+.gitpanel{grid-row:1;grid-column:5;position:relative}
 #costBanner{grid-row:2;grid-column:1/-1}
 .statusbar{grid-row:3;grid-column:1/-1}
 
-/* Git 패널: 하단 도킹 */
-.dock-bottom #app{grid-template-columns:266px 1fr;grid-template-rows:minmax(0,1fr) minmax(180px,32vh) auto auto}
+/* Git 패널: 하단 도킹 — 우측 리사이저/패널 숨김 */
+.dock-bottom #app{grid-template-columns:var(--col-left,266px) 5px 1fr 0 0;grid-template-rows:minmax(0,1fr) minmax(180px,32vh) auto auto}
 .dock-bottom .sidebar{grid-row:1/3;grid-column:1}
-.dock-bottom .center{grid-row:1;grid-column:2}
-.dock-bottom .gitpanel{grid-row:2;grid-column:2;border-left:none;border-top:1px solid var(--line)}
+.dock-bottom .center{grid-row:1;grid-column:3/-1}
+.dock-bottom #resizerR{display:none}
+.dock-bottom .gitpanel{grid-row:2;grid-column:3/-1;border-left:none;border-top:1px solid var(--line)}
 .dock-bottom #costBanner{grid-row:3} .dock-bottom .statusbar{grid-row:4}
 
-/* Git 패널: 숨김(접힘) */
-.dock-hidden #app{grid-template-columns:266px 1fr}
-.dock-hidden .gitpanel{display:none}
+/* Git 패널: 숨김(접힘) — 우측 리사이저도 같이 */
+.dock-hidden #app{grid-template-columns:var(--col-left,266px) 5px 1fr 0 0}
+.dock-hidden .gitpanel,.dock-hidden #resizerR{display:none}
 
 /* detached 모드 — 단일 작업 풀스크린 */
 .detached #app{grid-template-columns:1fr}
-.detached .sidebar,.detached .gitpanel,.detached .agent-tabs{display:none!important}
+.detached .sidebar,.detached .gitpanel,.detached .agent-tabs,.detached .col-resize{display:none!important}
 .detached .center{grid-column:1/-1}
 .detached #onboarding{display:none!important}
 .detached-body{background:var(--bg)}
@@ -518,9 +524,11 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .mm-tree-svg{padding:8px 6px 14px}
 .mm-svg{display:block;margin-top:4px}
 .mm-svg .mm-edge{fill:none;stroke:var(--line);stroke-width:1.4}
-.mm-svg-node rect{fill:var(--panel2);stroke:var(--line);stroke-width:1;transition:filter .2s}
-.mm-svg-node.dir rect{fill:#10161e;stroke:var(--accent-d)}
-.mm-svg-node.last rect{stroke:var(--claude);stroke-width:2;filter:drop-shadow(0 0 6px var(--claude));animation:nodepulse 1.5s ease-in-out infinite}
+/* 테두리 제거 — 배경만 살짝 표시(투명에 가까움), 마지막 활동만 강조 */
+.mm-svg-node rect{fill:transparent;stroke:none;transition:filter .2s}
+.mm-svg-node:hover rect{fill:rgba(255,255,255,.03)}
+.mm-svg-node.dir rect{fill:transparent;stroke:none}
+.mm-svg-node.last rect{fill:rgba(232,148,103,.10);stroke:none;filter:drop-shadow(0 0 6px var(--claude));animation:nodepulse 1.5s ease-in-out infinite}
 @keyframes nodepulse{0%,100%{filter:drop-shadow(0 0 4px var(--claude))}50%{filter:drop-shadow(0 0 12px var(--claude))}}
 .mm-svg .mm-node-name{fill:var(--ink);font-family:var(--mono)}
 .mm-svg-node.dir .mm-node-name{fill:var(--accent);font-weight:700}

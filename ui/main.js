@@ -73,8 +73,9 @@ function layoutSvgTree(root){
   // entries (sorted: dir 먼저)
   const nodes = []; // { x, y, name, isFile, lastKind, count, acts }
   const edges = []; // { x1,y1,x2,y2 }
-  const NODE_H = 26, INDENT = 22, GAP_Y = 8, PAD_X = 12;
-  let cursorY = 12;
+  // 행간 좁힘: NODE_H 26→20, GAP_Y 8→2, cursorY 시작 12→6
+  const NODE_H = 20, INDENT = 18, GAP_Y = 2, PAD_X = 10;
+  let cursorY = 6;
   function walk(node, depth, parentY){
     const entries = Object.entries(node.children).sort(([an, av], [bn, bv]) => {
       const af = av.isFile ? 1 : 0, bf = bv.isFile ? 1 : 0;
@@ -133,11 +134,11 @@ function renderMinimap(a, opts){
     const cls = n.isFile ? "file" : "dir";
     const isLast = i === lastFileIdx;
     const icon = n.lastKind ? activityIcon(n.lastKind) : (n.isFile ? "📄" : "📁");
-    const countText = n.count > 1 ? `<text x="190" y="${n.y + 17}" font-size="10" fill="var(--faint)" text-anchor="end">×${n.count}</text>` : "";
+    const countText = n.count > 1 ? `<text x="190" y="${n.y + 13}" font-size="10" fill="var(--faint)" text-anchor="end">×${n.count}</text>` : "";
     return `<g class="mm-svg-node ${cls} ${isLast ? "last" : ""}">
-      <rect x="${n.x}" y="${n.y}" width="200" height="22" rx="6" />
-      <text x="${n.x + 6}" y="${n.y + 16}" font-size="13">${icon}</text>
-      <text x="${n.x + 26}" y="${n.y + 16}" font-size="12" class="mm-node-name">${esc(n.name)}</text>
+      <rect x="${n.x}" y="${n.y}" width="200" height="18" rx="4" />
+      <text x="${n.x + 4}" y="${n.y + 13}" font-size="12">${icon}</text>
+      <text x="${n.x + 22}" y="${n.y + 13}" font-size="11.5" class="mm-node-name">${esc(n.name)}</text>
       ${countText}
     </g>`;
   }).join("");
@@ -995,7 +996,43 @@ function showLoginHelper(){
   });
 }
 
+// 컬럼 리사이저 — 좌-중 / 중-우. localStorage 영속, 더블클릭=리셋
+function initColumnResizers(){
+  const app = document.getElementById("app"); if (!app) return;
+  const apply = () => {
+    const l = parseInt(localStorage.getItem("cc_colL") || "266", 10);
+    const r = parseInt(localStorage.getItem("cc_colR") || "340", 10);
+    app.style.setProperty("--col-left", Math.max(180, Math.min(520, l)) + "px");
+    app.style.setProperty("--col-right", Math.max(220, Math.min(640, r)) + "px");
+  };
+  apply();
+  const bind = (id, isLeft) => {
+    const el = document.getElementById(id); if (!el) return;
+    let dragging = false, startX = 0, startVal = 0;
+    el.addEventListener("mousedown", (e) => {
+      dragging = true; startX = e.clientX;
+      startVal = parseInt(localStorage.getItem(isLeft ? "cc_colL" : "cc_colR") || (isLeft ? "266" : "340"), 10);
+      el.classList.add("dragging"); document.body.style.cursor = "col-resize"; e.preventDefault();
+    });
+    document.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const dx = e.clientX - startX;
+      const next = isLeft ? (startVal + dx) : (startVal - dx); // 우측은 반대
+      const clamped = Math.max(isLeft ? 180 : 220, Math.min(isLeft ? 520 : 640, next));
+      localStorage.setItem(isLeft ? "cc_colL" : "cc_colR", String(clamped));
+      apply();
+    });
+    document.addEventListener("mouseup", () => { if (dragging) { dragging = false; el.classList.remove("dragging"); document.body.style.cursor = ""; } });
+    el.addEventListener("dblclick", () => {
+      localStorage.removeItem(isLeft ? "cc_colL" : "cc_colR"); apply();
+    });
+  };
+  bind("resizerL", true);
+  bind("resizerR", false);
+}
+
 async function enterApp(){
+  initColumnResizers();
   // detached: 단일 작업 풀스크린 — 사이드바·탭바 숨김, 해당 작업만 자동 선택
   if (DETACHED && DETACHED_ID) {
     document.body.classList.add("detached-body");
