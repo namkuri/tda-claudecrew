@@ -157,6 +157,13 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **비동기 enterApp**: `check_claude`/`get_cost_cap`/`check_api_mode`/`loadAgents`/`refreshUsage`를 `Promise.allSettled`로 병렬. 화면이 즉시 응답하고 컴포저 입력 가능. 우상단에 떠다니는 **부트 토스트**(스피너 + "준비 중…"/"이전 작업 복원 중…"). 완료 자동 숨김.
   - **detached 양방향**: 별도 창에서 보던 작업이 메인에서 `agent_removed`로 제거되면 친화 메시지 "⚠ 이 작업이 메인에서 제거되었어요. 창을 닫아도 좋아요."
   - **분할 패널 모드**: 메인 콘솔 헤더에 **⊟ 분할** 탭 추가 — 콘솔(좌)과 미니맵(우) 동시 표시. `cc_pane_<id>` localStorage 영속화. 좁은 창에서는 자동 상하 분할.
+- **미니맵 시각 강화 + 자동 검증 + 사이드바 필터(v0.15.0)**:
+  - **SVG 미니맵 트리**: 기존 HTML 트리 → SVG. `layoutSvgTree`가 깊이별 들여쓰기로 노드 좌표 계산, 노드 카드(rounded rect + 도구 아이콘 + 파일/폴더명 + 반복 카운트). 부모-자식 베지에 곡선 엣지.
+  - **마지막 활동 노드 펄스**: claude 코랄색 + drop-shadow 펄스 애니메이션. 시간축 재생 시 cut-off에 따라 마지막 활동이 자동으로 이동.
+  - **에이전트 배지 오버레이**: 작업의 role(오케스트레이터/팀/전문가) 아이콘이 마지막 활동 노드 위에 떠다님. 코랄 펄스 + 한국어/영어 이름.
+  - **활동 로그 펄스**: 가장 최근 한 줄에 코랄 좌측 보더 + 부드러운 펄스. 재생/실시간 모두에서 다음 활동 위치를 한눈에.
+  - **자동 검증 토글(✨ Pretty 옆 🧪 자동검증)**: 켜면 `agent_done` 시 자동으로 `verify_changes` 호출. 실패 시 토스트로 알림. localStorage 영속화.
+  - **사이드바 작업 검색·필터**: 작업 4건 이상이면 표시. 텍스트 검색(prompt/branch/id) + 상태 필터(전체/진행/완료/오류). 데모: '로그인' 검색 → 절반만 표시.
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.

@@ -56,6 +56,7 @@
       <div class="brand sm">Claude<b>Crew</b></div>
       <div class="side-top-actions">
         <button class="chip" id="btnPretty" data-i18n-title="prettyTitle" title="콘솔을 사람이 읽기 좋게 — 도구 호출 그룹 접힘 + Markdown 렌더">✨ Pretty</button>
+        <button class="chip" id="btnAutoVerify" data-i18n-title="autoVerifyTitle" title="작업 완료 시 자동으로 빌드/테스트 검증">🧪 자동검증</button>
         <button class="chip" id="btnLang" title="언어 / Language">EN</button>
       </div>
     </div>
@@ -83,6 +84,15 @@
         <span class="repo-count" id="repoCount">0</span>
       </div>
       <div class="ws-row base" id="wsBase" title="기준 브랜치"><span class="ws-br">⎇</span><span class="ws-title">main</span></div>
+      <div class="ws-filter hidden" id="wsFilter">
+        <input type="text" id="wsQuery" data-i18n-ph="wsSearchPh" placeholder="🔎 작업 검색…" />
+        <div class="ws-flt-row">
+          <button class="flt on" data-flt="all" data-i18n="fltAll">전체</button>
+          <button class="flt" data-flt="running" data-i18n="fltRunning">진행</button>
+          <button class="flt" data-flt="done" data-i18n="fltDone">완료</button>
+          <button class="flt" data-flt="error" data-i18n="fltError">오류</button>
+        </div>
+      </div>
       <div class="ws-list" id="wsList"></div>
     </div>
 

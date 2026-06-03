@@ -67,21 +67,99 @@ function renderTree(node, indent=0){
     return `<div class="mm-node ${child.isFile ? "file" : "dir"}"><span class="mm-icon">${icon}</span><span class="mm-name">${esc(name)}</span>${count}${childHtml}</div>`;
   }).join("");
 }
-function renderMinimap(a){
+// ─────── SVG 노드 트리 레이아웃 (아래는 깊이별로 들여쓰기, 노드는 둥근 카드) ───────
+// 단순 indent 기반 — 라이브러리 없이 가벼움.
+function layoutSvgTree(root){
+  // entries (sorted: dir 먼저)
+  const nodes = []; // { x, y, name, isFile, lastKind, count, acts }
+  const edges = []; // { x1,y1,x2,y2 }
+  const NODE_H = 26, INDENT = 22, GAP_Y = 8, PAD_X = 12;
+  let cursorY = 12;
+  function walk(node, depth, parentY){
+    const entries = Object.entries(node.children).sort(([an, av], [bn, bv]) => {
+      const af = av.isFile ? 1 : 0, bf = bv.isFile ? 1 : 0;
+      return af - bf || an.localeCompare(bn);
+    });
+    entries.forEach(([name, child]) => {
+      const x = PAD_X + depth * INDENT;
+      const y = cursorY;
+      const last = child._acts[child._acts.length - 1];
+      nodes.push({ x, y, name, isFile: !!child.isFile, lastKind: last ? last.kind : null,
+                   count: child._acts.length, acts: child._acts.slice() });
+      if (parentY != null){
+        edges.push({ x1: x - INDENT + 12, y1: parentY + NODE_H/2 + 6, x2: x - 4, y2: y + NODE_H/2 });
+      }
+      cursorY += NODE_H + GAP_Y;
+      if (Object.keys(child.children).length){ walk(child, depth + 1, y); }
+    });
+  }
+  walk(root, 0, null);
+  return { nodes, edges, width: 280, height: Math.max(60, cursorY + 8) };
+}
+
+// 마지막 N개의 활동 인덱스를 강조(애니메이션 가능). agentRole 도 함께 표시 가능.
+function renderMinimap(a, opts){
+  opts = opts || {};
   const acts = extractActivities(a.output || []);
   if (acts.length === 0) return `<div class="mm-empty">${esc(t("minimapEmpty"))}</div>`;
   const tree = buildFileTree(acts);
-  const treeHtml = renderTree(tree);
-  // 시간순 활동 로그(우측)
-  const logHtml = acts.slice(-30).reverse().map(act =>
-    `<div class="mm-log-row"><span class="mm-icon">${activityIcon(act.kind)}</span> <code>${esc(act.target.slice(0,80))}</code> <span class="mm-kind">${esc(act.kind)}</span></div>`).join("");
-  // 다른 도구(Glob/Grep/Bash)는 간단 요약
+  // SVG 트리
+  const layout = layoutSvgTree(tree);
+  const lastFileIdx = (() => {
+    // 마지막 파일 활동(Read/Write/Edit) 의 nodes 인덱스
+    let lastAct = null;
+    for (let i = acts.length - 1; i >= 0; i--) {
+      if (["Read","Write","Edit"].includes(acts[i].kind)) { lastAct = acts[i]; break; }
+    }
+    if (!lastAct) return -1;
+    // 같은 target 의 노드 찾기
+    const last = lastAct.target.split(/[\\/]/).filter(Boolean).pop();
+    return layout.nodes.findIndex(n => n.isFile && n.name === last);
+  })();
+  // 부모 에이전트 배지(작업의 role) — 마지막 활동 노드 위에 떠있음
+  const agentBadge = (() => {
+    if (lastFileIdx < 0) return "";
+    const n = layout.nodes[lastFileIdx];
+    const b = badgeOf(a.role || "orchestrator");
+    return `<g class="mm-agent" transform="translate(${n.x + 200}, ${n.y - 4})">
+      <circle r="13" cx="0" cy="13" fill="var(--claude)" />
+      <text x="0" y="18" text-anchor="middle" font-size="13">${b.icon}</text>
+      <text x="-18" y="9" text-anchor="end" font-size="9" fill="var(--ink)">${esc(b[lang === "en" ? "en" : "ko"])}</text>
+    </g>`;
+  })();
+
+  const edgesSvg = layout.edges.map(e => `<path d="M${e.x1} ${e.y1} C${e.x1} ${(e.y1 + e.y2)/2}, ${e.x2 - 12} ${e.y2}, ${e.x2} ${e.y2}" class="mm-edge"/>`).join("");
+  const nodesSvg = layout.nodes.map((n, i) => {
+    const cls = n.isFile ? "file" : "dir";
+    const isLast = i === lastFileIdx;
+    const icon = n.lastKind ? activityIcon(n.lastKind) : (n.isFile ? "📄" : "📁");
+    const countText = n.count > 1 ? `<text x="190" y="${n.y + 17}" font-size="10" fill="var(--faint)" text-anchor="end">×${n.count}</text>` : "";
+    return `<g class="mm-svg-node ${cls} ${isLast ? "last" : ""}">
+      <rect x="${n.x}" y="${n.y}" width="200" height="22" rx="6" />
+      <text x="${n.x + 6}" y="${n.y + 16}" font-size="13">${icon}</text>
+      <text x="${n.x + 26}" y="${n.y + 16}" font-size="12" class="mm-node-name">${esc(n.name)}</text>
+      ${countText}
+    </g>`;
+  }).join("");
+
+  // 시간순 활동 로그(우측) — 가장 최근(=마지막) 한 줄은 강조 펄스
+  const recent = acts.slice(-30);
+  const lastRecentIdx = recent.length - 1;
+  const logHtml = recent.map((act, i) => {
+    const cls = i === lastRecentIdx ? "mm-log-row last" : "mm-log-row";
+    return `<div class="${cls}"><span class="mm-icon">${activityIcon(act.kind)}</span> <code>${esc(act.target.slice(0,80))}</code> <span class="mm-kind">${esc(act.kind)}</span></div>`;
+  }).reverse().join("");
   const others = acts.filter(a => ["Glob","Grep","Bash","PowerShell"].includes(a.kind));
   const otherCount = ["Glob","Grep","Bash"].map(k => `${activityIcon(k)} ${others.filter(o => o.kind === k).length}`).join("  ");
+
   return `<div class="mm-grid">
-    <div class="mm-tree">
+    <div class="mm-tree mm-tree-svg">
       <div class="mm-head">${esc(t("minimapTree"))}</div>
-      ${treeHtml || `<div class="mm-empty-sub">${esc(t("minimapNoFiles"))}</div>`}
+      <svg class="mm-svg" viewBox="0 0 320 ${layout.height}" preserveAspectRatio="xMinYMin meet" width="100%" height="${layout.height}px">
+        ${edgesSvg}
+        ${nodesSvg}
+        ${agentBadge}
+      </svg>
       <div class="mm-other">${otherCount}</div>
     </div>
     <div class="mm-log">
@@ -174,6 +252,9 @@ const I18N = {
     noSession: "이 작업은 아직 세션이 시작되지 않아 후속 대화를 보낼 수 없어요.",
     talkingTo: "대화 상대", role_orchestrator: "오케스트레이터", role_team: "팀장(병렬 위임)",
     prettyTitle: "Pretty 모드 — 도구 호출 그룹 접힘 + Markdown 렌더 + 추론/답변 구분",
+    autoVerifyTitle: "작업이 끝나면 빌드/테스트를 자동으로 돌려 결과를 알려줘요.",
+    autoVerifyFailed: "🧪 자동 검증 — 실패 항목이 있습니다. '적용' 전에 확인해보세요.",
+    wsSearchPh: "🔎 작업 검색…", fltAll: "전체", fltRunning: "진행", fltDone: "완료", fltError: "오류",
     thinkingLabel: "추론", answerLabel: "답변", expandAll: "모두 펼치기", collapseAll: "모두 접기",
     scrollDown: "↓ 새 내용 보기",
     popout: "🪟 별도 창", popoutTitle: "이 작업만 별도 창으로 분리해서 보기",
@@ -260,6 +341,9 @@ const I18N = {
     noSession: "No session yet — this task hasn't produced its first response, so follow-up isn't possible.",
     talkingTo: "Talking to", role_orchestrator: "Orchestrator", role_team: "Lead (parallel delegate)",
     prettyTitle: "Pretty mode — collapse tool-call groups + render Markdown + separate thinking/answer",
+    autoVerifyTitle: "Automatically run build/test when a task finishes.",
+    autoVerifyFailed: "🧪 Auto-verify — some steps failed. Review before applying.",
+    wsSearchPh: "🔎 Find a task…", fltAll: "All", fltRunning: "Active", fltDone: "Done", fltError: "Error",
     thinkingLabel: "Thinking", answerLabel: "Answer", expandAll: "Expand all", collapseAll: "Collapse all",
     scrollDown: "↓ Jump to latest",
     popout: "🪟 Pop out", popoutTitle: "Open this task in its own window",
@@ -420,6 +504,7 @@ const openTabs = [];            // 열린 탭(작업 id 순서)
 let authMode = localStorage.getItem("cc_authmode") || "subscription"; // subscription(앱 플랜) | api
 let pretty = localStorage.getItem("cc_pretty") === "1"; // Pretty 모드(콘솔 그룹 접힘 + Markdown)
 let gitDock = localStorage.getItem("cc_gitDock") || "right"; // right(기본) | bottom | hidden
+let autoVerify = localStorage.getItem("cc_autoVerify") === "1"; // 작업 완료 시 자동 검증
 let baseBranch = "main"; // 저장소의 기본/기준 브랜치 — 작업 선택 시 백엔드가 검출해 채움
 
 function repoBaseName(){
@@ -614,7 +699,24 @@ $("#btnPretty").addEventListener("click", () => {
 function syncPrettyBtn(){
   const b = $("#btnPretty"); if (!b) return;
   b.classList.toggle("on", !!pretty);
+  const av = $("#btnAutoVerify"); if (av) av.classList.toggle("on", !!autoVerify);
 }
+// 사이드바 검색 + 필터
+$("#wsQuery")?.addEventListener("input", (e) => { wsQuery = e.target.value || ""; renderSidebar(); });
+document.querySelectorAll("#wsFilter .flt").forEach(btn => {
+  btn.addEventListener("click", () => {
+    wsStatusFilter = btn.dataset.flt;
+    document.querySelectorAll("#wsFilter .flt").forEach(b => b.classList.toggle("on", b === btn));
+    renderSidebar();
+  });
+});
+
+// 자동 검증 토글
+$("#btnAutoVerify")?.addEventListener("click", () => {
+  autoVerify = !autoVerify;
+  localStorage.setItem("cc_autoVerify", autoVerify ? "1" : "0");
+  syncPrettyBtn();
+});
 
 // Git 패널 도킹 — right / bottom / hidden
 function applyGitDock(){
@@ -1295,14 +1397,30 @@ function renderStatusStrip(){
   $("#apiHint")?.classList.toggle("hidden", running < 3 || authMode === "api"); // API면 구독 한도 걱정 불필요
 }
 
+// 사이드바 검색·필터 상태
+let wsQuery = "", wsStatusFilter = "all";
+function matchFilter(a){
+  if (wsStatusFilter !== "all"){
+    if (wsStatusFilter === "running") { if (!(a.status === "running" || a.status === "creating" || a.status === "warming")) return false; }
+    else if (a.status !== wsStatusFilter) return false;
+  }
+  if (wsQuery){
+    const q = wsQuery.toLowerCase();
+    const hay = ((a.prompt || "") + " " + (a.branch || "") + " " + (a.id || "")).toLowerCase();
+    if (!hay.includes(q)) return false;
+  }
+  return true;
+}
 function renderSidebar(){
   $("#repoName").textContent = repoBaseName();
   $("#repoCount").textContent = state.size;
   const wsBaseTitle = document.querySelector("#wsBase .ws-title");
   if (wsBaseTitle) wsBaseTitle.textContent = baseBranch;
+  // 검색·필터 행은 작업이 4건 이상일 때만 표시
+  $("#wsFilter")?.classList.toggle("hidden", state.size < 4);
   const list = $("#wsList"); if (!list) return;
   list.innerHTML = "";
-  [...state.values()].forEach(a => {
+  [...state.values()].filter(matchFilter).forEach(a => {
     ensureStat(a.id);
     const st = a._stat || { adds: 0, dels: 0 };
     const row = document.createElement("div");
@@ -1635,8 +1753,16 @@ listen("agent_done", (ev) => {
   const a = ev.payload; const cur = state.get(a.id) || {};
   const merged = { ...cur, ...a, output: cur.output || [], _stat: null };
   state.set(a.id, merged);
-  addWeekly(a.id, (merged.tokens_in || 0) + (merged.tokens_out || 0)); // 주간 누적(작업당 1회)
+  addWeekly(a.id, (merged.tokens_in || 0) + (merged.tokens_out || 0));
   render();
+  // 자동 검증 — 사용자가 토글했을 때, 성공 종료(done)이면 verify_changes 자동 실행
+  if (autoVerify && merged.status === "done" && !merged._verify && !merged._verifying){
+    merged._verifying = true; render();
+    invoke("verify_changes", { id: merged.id })
+      .then(v => { merged._verify = v; merged._verifying = false; render();
+        if (!v.success && v.ran) showHint(t("autoVerifyFailed")); })
+      .catch(e => { merged._verifying = false; merged._verify = { ran:false, success:false, steps:[], note:String(e) }; render(); });
+  }
 });
 listen("agent_removed", (ev) => {
   const id = ev.payload.id; state.delete(id);
