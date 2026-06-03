@@ -157,6 +157,12 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **비동기 enterApp**: `check_claude`/`get_cost_cap`/`check_api_mode`/`loadAgents`/`refreshUsage`를 `Promise.allSettled`로 병렬. 화면이 즉시 응답하고 컴포저 입력 가능. 우상단에 떠다니는 **부트 토스트**(스피너 + "준비 중…"/"이전 작업 복원 중…"). 완료 자동 숨김.
   - **detached 양방향**: 별도 창에서 보던 작업이 메인에서 `agent_removed`로 제거되면 친화 메시지 "⚠ 이 작업이 메인에서 제거되었어요. 창을 닫아도 좋아요."
   - **분할 패널 모드**: 메인 콘솔 헤더에 **⊟ 분할** 탭 추가 — 콘솔(좌)과 미니맵(우) 동시 표시. `cc_pane_<id>` localStorage 영속화. 좁은 창에서는 자동 상하 분할.
+- **3-in-1 우측 패널 + 타임라인 시간 표시 + 작업 그룹 + 일본어(v0.16.0)**:
+  - **3-in-1 도킹**: 우측 `gitpanel` 한 패널 안에서 `🌿 Git`/`🗺 미니맵`/`🧪 검증` 탭 전환. `cc_rightPanel` localStorage 영속화. 좁은 창에서 패널 3개 펼치지 않고도 모든 정보 접근.
+  - **패널 팝아웃**: `open_task_window(id, panel)`에 두 번째 인자(`minimap`/`verify`). 해당 패널만 띄우는 단일 창 모드(`?panel=minimap`). CSS `.detached-panel-minimap`이 콘솔 숨기고 패널 전체 폭으로.
+  - **타임라인 시간 표시**: `selectAgent`가 `ensureTimeline(id)` → `get_timeline` lazy 로드. 타임라인 바에 `경과/전체` 시간 핀(코랄 색 `.tltime`). 백엔드 `.cc-timeline.jsonl` UI에서 실제 활용.
+  - **사이드바 작업 그룹**: 4건 이상 + 필터 `전체`일 때 `▶ 진행 중 · ✓ 완료 · ⚠ 오류` 3그룹으로 분리(빈 그룹 숨김).
+  - **일본어(ja) 다국어**: `I18N.ja` ~50키 추가. 토글 3-cycle `ko → en → ja → ko`. 누락 키는 영어 → 한국어로 폴백.
 - **미니맵 시각 강화 + 자동 검증 + 사이드바 필터(v0.15.0)**:
   - **SVG 미니맵 트리**: 기존 HTML 트리 → SVG. `layoutSvgTree`가 깊이별 들여쓰기로 노드 좌표 계산, 노드 카드(rounded rect + 도구 아이콘 + 파일/폴더명 + 반복 카운트). 부모-자식 베지에 곡선 엣지.
   - **마지막 활동 노드 펄스**: claude 코랄색 + drop-shadow 펄스 애니메이션. 시간축 재생 시 cut-off에 따라 마지막 활동이 자동으로 이동.

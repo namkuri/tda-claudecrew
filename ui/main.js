@@ -183,11 +183,13 @@ function visibleOutput(a){
   return out.slice(0, Math.max(0, Math.min(out.length, s.scrub)));
 }
 
-// ── 멀티 윈도우: URL ?detached=1&taskId=<id> 면 단일 작업 풀스크린 모드 ──
+// ── 멀티 윈도우: URL ?detached=1&taskId=<id>(&panel=minimap|verify) ──
 const _qs = new URLSearchParams(location.search);
 const DETACHED = _qs.get("detached") === "1";
 const DETACHED_ID = _qs.get("taskId") || null;
+const DETACHED_PANEL = _qs.get("panel") || null; // null=전체, 'minimap'/'verify'=해당 패널만
 if (DETACHED) document.documentElement.classList.add("detached");
+if (DETACHED_PANEL) document.documentElement.classList.add("detached-panel-" + DETACHED_PANEL);
 
 // ---------- 다국어 (i18n) ----------
 const I18N = {
@@ -255,6 +257,9 @@ const I18N = {
     autoVerifyTitle: "작업이 끝나면 빌드/테스트를 자동으로 돌려 결과를 알려줘요.",
     autoVerifyFailed: "🧪 자동 검증 — 실패 항목이 있습니다. '적용' 전에 확인해보세요.",
     wsSearchPh: "🔎 작업 검색…", fltAll: "전체", fltRunning: "진행", fltDone: "완료", fltError: "오류",
+    verifyTab: "검증", verifyHint: "🧪 자동 검증 결과가 아직 없어요. 작업이 끝났을 때 자동으로 돌거나, 아래 버튼을 누르면 지금 검증해요.",
+    verifyRun: "지금 검증 실행",
+    grpActive: "▶ 진행 중", grpDone: "✓ 완료", grpIssue: "⚠ 점검 필요",
     thinkingLabel: "추론", answerLabel: "답변", expandAll: "모두 펼치기", collapseAll: "모두 접기",
     scrollDown: "↓ 새 내용 보기",
     popout: "🪟 별도 창", popoutTitle: "이 작업만 별도 창으로 분리해서 보기",
@@ -344,6 +349,9 @@ const I18N = {
     autoVerifyTitle: "Automatically run build/test when a task finishes.",
     autoVerifyFailed: "🧪 Auto-verify — some steps failed. Review before applying.",
     wsSearchPh: "🔎 Find a task…", fltAll: "All", fltRunning: "Active", fltDone: "Done", fltError: "Error",
+    verifyTab: "Verify", verifyHint: "🧪 No auto-verify result yet. It runs when a task finishes, or click below to verify now.",
+    verifyRun: "Run verify now",
+    grpActive: "▶ Active", grpDone: "✓ Done", grpIssue: "⚠ Needs attention",
     thinkingLabel: "Thinking", answerLabel: "Answer", expandAll: "Expand all", collapseAll: "Collapse all",
     scrollDown: "↓ Jump to latest",
     popout: "🪟 Pop out", popoutTitle: "Open this task in its own window",
@@ -371,9 +379,34 @@ const I18N = {
     sbSrcTitle: "Data source: Claude Code stats-cache, or this app's own tally",
   },
 };
+// 일본어(간이판) — 핵심 키만. 누락 키는 영어로 폴백.
+I18N.ja = {
+  lead: "AIの専門家チームに作業を任せる、いちばん簡単な方法。<br/>3ステップで準備完了！",
+  step1_h: "Claude の準備確認", step2_h: "作業フォルダを選択", step3_h: "セットアップ完了",
+  btnCheck: "確認する", btnFolder: "フォルダ選択", btnSetup: "専門家をインストール", btnStart: "はじめる →",
+  noFolder: "フォルダなし", changeFolder: "フォルダ変更",
+  cap: "上限 $", usage: "使用量 ",
+  r_bug: "🐞 バグ修正", r_feature: "✨ 機能追加", r_explain: "📖 コード説明", r_test: "🧪 テスト作成",
+  r_cleanup: "🧹 整理・リファクタ", r_review: "🔍 コードレビュー", r_plan: "🧠 計画立案", r_security: "🛡️ セキュリティ点検",
+  speedLabel: "丁寧さ", speedFast: "速く", speedNormal: "普通", speedCareful: "丁寧に",
+  keepMode: "完了モード", searchOn: "検索オン", teamMode: "チームに任せる", lspMode: "精密編集",
+  safeLock: "🔒 安全", safeFolder: "このフォルダのみ", safeRead: "読取専用", safeFull: "全許可",
+  run: "▶ 専門家に任せる", empty: "まだタスクがありません。レシピを選ぶか依頼を入力して ▶ を押してください。",
+  status_creating: "準備中", status_running: "作業中", status_done: "完了", status_error: "エラー", status_stopped: "停止", status_committed: "保存済", status_warming: "学習中",
+  talkingTo: "対話相手", role_orchestrator: "オーケストレーター", role_team: "リーダー(並列委任)",
+  prettyTitle: "Pretty モード — 道具呼出グループ折りたたみ + Markdown",
+  bootLoading: "準備中…", bootRestoring: "以前のタスクを復元中…",
+  newTask: "＋ 新規タスク", newTabLabel: "＋ 新規タスク",
+  fltAll: "全て", fltRunning: "進行", fltDone: "完了", fltError: "エラー",
+  grpActive: "▶ 進行中", grpDone: "✓ 完了", grpIssue: "⚠ 要確認",
+  minimapTab: "ミニマップ", verifyTab: "検証",
+  tlPlay: "再生/一時停止", tlBack: "最初へ", tlLive: "ライブ",
+  popout: "🪟 別ウィンドウ",
+};
 let lang = localStorage.getItem("cc_lang") || "ko";
 function t(key, ...args){
-  let s = (I18N[lang] && I18N[lang][key]) ?? I18N.ko[key] ?? key;
+  // 폴백: 현재 lang → en → ko → key
+  let s = (I18N[lang] && I18N[lang][key]) ?? I18N.en?.[key] ?? I18N.ko[key] ?? key;
   args.forEach((a, i) => { s = s.replace("{" + i + "}", a); });
   return s;
 }
@@ -383,7 +416,7 @@ function applyI18n(){
   document.querySelectorAll("[data-i18n-html]").forEach(el => { el.innerHTML = t(el.dataset.i18nHtml); });
   document.querySelectorAll("[data-i18n-ph]").forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
   document.querySelectorAll("[data-i18n-title]").forEach(el => { el.title = t(el.dataset.i18nTitle); });
-  const lb = $("#btnLang"); if (lb) lb.textContent = lang === "ko" ? "EN" : "한국어";
+  const lb = $("#btnLang"); if (lb) lb.textContent = lang === "ko" ? "EN" : (lang === "en" ? "日本語" : "한국어");
   if ($("#repoName")) $("#repoName").textContent = repoBaseName();
   syncPrettyBtn();
   applyGitDock();
@@ -462,7 +495,12 @@ function makeDemoApi(){
                                 return Promise.resolve({ available:false, today_tokens:0, week_tokens:0, today_messages:0, week_messages:0, total_messages:0, total_sessions:0, models:[] });
       case "open_path":         console.log("[demo] open_path", args.path); return Promise.resolve();
       case "get_base_branch":   return Promise.resolve("main");
-      case "open_task_window":  window.open(location.pathname + "?detached=1&taskId=" + args.id, "task-" + args.id, "width=1100,height=760"); return Promise.resolve();
+      case "open_task_window":  {
+        const p = args.panel ? "&panel=" + args.panel : "";
+        const wn = "task-" + args.id + (args.panel ? "-" + args.panel : "");
+        window.open(location.pathname + "?detached=1&taskId=" + args.id + p, wn, "width=900,height=620");
+        return Promise.resolve();
+      }
       case "verify_changes":    return Promise.resolve({ ran:true, success:true, note:"감지됨: Node", steps:[
         { name:"npm", command:"npm run build", success:true, stdout:"built", stderr:"" },
         { name:"npm", command:"npm test", success:true, stdout:"3 passed", stderr:"" },
@@ -504,6 +542,7 @@ const openTabs = [];            // 열린 탭(작업 id 순서)
 let authMode = localStorage.getItem("cc_authmode") || "subscription"; // subscription(앱 플랜) | api
 let pretty = localStorage.getItem("cc_pretty") === "1"; // Pretty 모드(콘솔 그룹 접힘 + Markdown)
 let gitDock = localStorage.getItem("cc_gitDock") || "right"; // right(기본) | bottom | hidden
+let rightPanel = localStorage.getItem("cc_rightPanel") || "git"; // git | minimap | verify — 우측 컨테이너 활성 탭
 let autoVerify = localStorage.getItem("cc_autoVerify") === "1"; // 작업 완료 시 자동 검증
 let baseBranch = "main"; // 저장소의 기본/기준 브랜치 — 작업 선택 시 백엔드가 검출해 채움
 
@@ -735,7 +774,15 @@ function setGitDock(v){ gitDock = v; applyGitDock(); }
 // 도킹 컨트롤 버튼들 + 드래그(HTML5)
 function bindGitDock(){
   document.querySelectorAll("#gpDockCtrl button").forEach(b => {
-    b.onclick = (e) => { e.stopPropagation(); setGitDock(b.dataset.dock); };
+    b.onclick = (e) => {
+      e.stopPropagation();
+      if (b.dataset.dock === "popout") {
+        // 현재 활성 우측 탭(rightPanel)을 별도 창으로
+        if (selectedId) invoke("open_task_window", { id: selectedId, panel: rightPanel }).catch(err => alert(t("opFail") + err));
+        return;
+      }
+      setGitDock(b.dataset.dock);
+    };
   });
   const ctrl = $("#gpDockCtrl");
   if (ctrl){
@@ -768,7 +815,8 @@ function bindGitDock(){
 }
 
 $("#btnLang").addEventListener("click", () => {
-  lang = lang === "ko" ? "en" : "ko";
+  // 3-cycle: ko → en → ja → ko
+  lang = lang === "ko" ? "en" : (lang === "en" ? "ja" : "ko");
   localStorage.setItem("cc_lang", lang);
   applyI18n();
 });
@@ -838,6 +886,10 @@ async function enterApp(){
   if (DETACHED && DETACHED_ID) {
     document.body.classList.add("detached-body");
     selectedId = DETACHED_ID;
+    // panel 단독 모드: 우측 패널을 해당 탭으로 강제
+    if (DETACHED_PANEL === "minimap" || DETACHED_PANEL === "verify") {
+      rightPanel = DETACHED_PANEL;
+    }
     render();
     return;
   }
@@ -1110,6 +1162,20 @@ async function ensureFullOutput(id){
   } catch (_) {}
 }
 
+// 선택 시 타임라인(.cc-timeline.jsonl) 디스크 로드 — 시간 기반 재생 가능
+async function ensureTimeline(id){
+  const a = state.get(id);
+  if (!a || a._timelineLoaded) return;
+  a._timelineLoaded = true;
+  try {
+    const tl = await invoke("get_timeline", { id });
+    if (Array.isArray(tl) && tl.length) {
+      a._timelineData = tl; // [{t, text}, ...]
+      if (selectedId === id) renderStage();
+    }
+  } catch (_) {}
+}
+
 function costTotal(){
   let s = 0; state.forEach(a => { if (a.cost) s += a.cost; });
   return s;
@@ -1179,15 +1245,24 @@ function renderOrchBar(a){
 // 시간축 — 슬라이더(0~output.length) + 재생/일시정지/속도/LIVE 복귀
 function renderTimelineBar(a){
   const total = (a.output || []).length;
-  if (total < 2) return ""; // 짧으면 의미 없음
+  if (total < 2) return "";
   const s = tlState(a.id);
   const pos = s.scrub == null ? total : s.scrub;
   const live = s.scrub == null;
+  // 타임라인 데이터가 있으면 시간 정보(총 소요·현재 시각)도 표시
+  const tld = a._timelineData;
+  let timeInfo = "";
+  if (tld && tld.length >= 2){
+    const totalMs = (tld[tld.length-1].t || 0) - (tld[0].t || 0);
+    const posT = tld[Math.max(0, Math.min(tld.length - 1, pos - 1))];
+    const elapsedMs = posT ? (posT.t - tld[0].t) : 0;
+    timeInfo = `<span class="tltime">${fmtDuration(elapsedMs)} / ${fmtDuration(totalMs)}</span>`;
+  }
   return `<div class="tlbar">
     <button class="tlbtn" data-tl="play" title="${esc(t("tlPlay"))}">${s.playing ? "⏸" : "▶"}</button>
     <button class="tlbtn" data-tl="back" title="${esc(t("tlBack"))}">⏮</button>
     <input class="tlrange" type="range" min="0" max="${total}" value="${pos}" data-tl="range"/>
-    <span class="tlpos">${pos}/${total}</span>
+    <span class="tlpos">${pos}/${total}</span>${timeInfo}
     <select class="tlspeed" data-tl="speed">
       <option value="1" ${s.speed === 1 ? "selected" : ""}>1×</option>
       <option value="2" ${s.speed === 2 ? "selected" : ""}>2×</option>
@@ -1363,8 +1438,10 @@ function selectAgent(id){
   openTab(id); selectedId = id; render();
   // 1) 기준 브랜치 라벨
   invoke("get_base_branch", { id }).then(b => { if (b && b !== baseBranch) { baseBranch = b; render(); } }).catch(()=>{});
-  // 2) lazy 전체 output (부트 시엔 200줄만 받아서 빠르므로, 선택할 때 한 번만)
+  // 2) lazy 전체 output
   ensureFullOutput(id);
+  // 3) 타임라인(밀리초 timestamp) — 시간 기반 재생/돌려감기
+  ensureTimeline(id);
 }
 function closeTab(id){
   const i = openTabs.indexOf(id); if (i >= 0) openTabs.splice(i, 1);
@@ -1411,6 +1488,11 @@ function matchFilter(a){
   }
   return true;
 }
+function statusGroup(a){
+  if (a.status === "running" || a.status === "creating" || a.status === "warming") return "active";
+  if (a.status === "error" || a.status === "stopped") return "issue";
+  return "done"; // done, committed 등
+}
 function renderSidebar(){
   $("#repoName").textContent = repoBaseName();
   $("#repoCount").textContent = state.size;
@@ -1420,21 +1502,40 @@ function renderSidebar(){
   $("#wsFilter")?.classList.toggle("hidden", state.size < 4);
   const list = $("#wsList"); if (!list) return;
   list.innerHTML = "";
+  // 작업 그룹화 — 필터가 '전체' + 검색 비었을 때만(필터 적용 시엔 평탄)
+  const grouped = !wsQuery && wsStatusFilter === "all" && state.size >= 4;
+  const buckets = { active: [], done: [], issue: [] };
   [...state.values()].filter(matchFilter).forEach(a => {
-    ensureStat(a.id);
-    const st = a._stat || { adds: 0, dels: 0 };
-    const row = document.createElement("div");
-    row.className = "ws-item" + (a.id === selectedId ? " active" : "");
-    row.dataset.id = a.id;
-    row.title = `${roleLabel(a)} · ${a.worktree || ""}`;
-    row.innerHTML =
-      `<span class="ws-st ${a.status}" title="${t("status_" + a.status) || a.status}"></span>` +
-      `<span class="ws-name">${esc((a.prompt || a.branch || a.id).trim() || a.id)}</span>` +
-      `<span class="ws-branch">${esc(a.branch || "")}</span>` +
-      `<span class="ws-stat"><span class="gp-add">+${st.adds}</span><span class="gp-del">-${st.dels}</span></span>` +
-      `<span class="ws-id">#${shortId(a.id)}</span>`;
-    list.appendChild(row);
+    if (grouped) buckets[statusGroup(a)].push(a);
+    else buckets.active.push(a);
   });
+  if (grouped){
+    [["active", t("grpActive")], ["done", t("grpDone")], ["issue", t("grpIssue")]].forEach(([key, label]) => {
+      if (!buckets[key].length) return;
+      const header = document.createElement("div");
+      header.className = "ws-grp-head";
+      header.innerHTML = `${esc(label)} <span class="ws-grp-n">${buckets[key].length}</span>`;
+      list.appendChild(header);
+      buckets[key].forEach(a => list.appendChild(makeWsRow(a)));
+    });
+    return;
+  }
+  buckets.active.forEach(a => list.appendChild(makeWsRow(a)));
+}
+function makeWsRow(a){
+  ensureStat(a.id);
+  const st = a._stat || { adds: 0, dels: 0 };
+  const row = document.createElement("div");
+  row.className = "ws-item" + (a.id === selectedId ? " active" : "");
+  row.dataset.id = a.id;
+  row.title = `${roleLabel(a)} · ${a.worktree || ""}`;
+  row.innerHTML =
+    `<span class="ws-st ${a.status}" title="${t("status_" + a.status) || a.status}"></span>` +
+    `<span class="ws-name">${esc((a.prompt || a.branch || a.id).trim() || a.id)}</span>` +
+    `<span class="ws-branch">${esc(a.branch || "")}</span>` +
+    `<span class="ws-stat"><span class="gp-add">+${st.adds}</span><span class="gp-del">-${st.dels}</span></span>` +
+    `<span class="ws-id">#${shortId(a.id)}</span>`;
+  return row;
 }
 
 function renderTabs(){
@@ -1605,19 +1706,61 @@ const _dockCtrlHtml = `<div class="dock-ctrl" id="gpDockCtrl" draggable="true" t
     <button data-dock="right" title="우측 도킹">→</button>
     <button data-dock="bottom" title="하단 도킹">↓</button>
     <button data-dock="hidden" title="숨김">✕</button>
+    <button data-dock="popout" title="별도 창">🪟</button>
   </div>`;
+function rightTabsHtml(){
+  return `<div class="rp-tabs">
+    <button class="rp-tab ${rightPanel === "git" ? "on" : ""}" data-rp="git" title="Git 변경/커밋">🌿 Git</button>
+    <button class="rp-tab ${rightPanel === "minimap" ? "on" : ""}" data-rp="minimap" title="에이전트 활동 미니맵">🗺 ${esc(t("minimapTab"))}</button>
+    <button class="rp-tab ${rightPanel === "verify" ? "on" : ""}" data-rp="verify" title="자동 검증 결과">🧪 ${esc(t("verifyTab"))}</button>
+  </div>`;
+}
+function bindRightTabs(){
+  document.querySelectorAll("#gitpanel .rp-tab").forEach(b => {
+    b.onclick = () => { rightPanel = b.dataset.rp; localStorage.setItem("cc_rightPanel", rightPanel); renderGit(); };
+  });
+}
+
 function renderGit(){
   const gp = $("#gitpanel"); if (!gp) return;
   if (!(selectedId && state.has(selectedId))){
-    gp.innerHTML = _dockCtrlHtml + `<div class="gp-empty">${t("gpEmpty")}</div>`;
-    bindGitDock();
+    gp.innerHTML = _dockCtrlHtml + rightTabsHtml() + `<div class="gp-empty">${t("gpEmpty")}</div>`;
+    bindGitDock(); bindRightTabs();
     return;
   }
+  if (rightPanel === "minimap"){
+    const a = state.get(selectedId);
+    const _ao = visibleOutput(a);
+    const _aFor = { ...a, output: _ao };
+    gp.innerHTML = _dockCtrlHtml + rightTabsHtml() +
+      `<div class="rp-body">${renderMinimap(_aFor)}</div>`;
+    bindGitDock(); bindRightTabs();
+    return;
+  }
+  if (rightPanel === "verify"){
+    const a = state.get(selectedId);
+    const v = a._verify;
+    const body = v ? renderVerifyPanel(a)
+      : `<div class="gp-empty" style="padding:20px;color:var(--dim)">${esc(t("verifyHint"))}
+         <br/><br/><button class="btn" data-act="verify-now">${esc(t("verifyRun"))}</button></div>`;
+    gp.innerHTML = _dockCtrlHtml + rightTabsHtml() + `<div class="rp-body">${body}</div>`;
+    bindGitDock(); bindRightTabs();
+    const vbtn = gp.querySelector('[data-act="verify-now"]');
+    if (vbtn) vbtn.onclick = async () => {
+      a._verifying = true; renderGit();
+      try { a._verify = await invoke("verify_changes", { id: a.id }); }
+      catch (e) { a._verify = { ran:false, success:false, steps:[], note: String(e) }; }
+      a._verifying = false; renderGit();
+    };
+    return;
+  }
+  // 기본: Git
+
   const a = state.get(selectedId); const st = a._stat;
   const filesHtml = st && st.files && st.files.length
     ? st.files.map(f => `<div class="gp-file" data-fdiff="1"><span class="fn">${esc(f.name)}</span><span class="fst"><span class="gp-add">+${f.adds}</span><span class="gp-del">-${f.dels}</span></span></div>`).join("")
     : `<div class="gp-empty" style="padding:4px 6px">${t("gpNoChange")}</div>`;
-  gp.innerHTML = _dockCtrlHtml +
+  gp.innerHTML = _dockCtrlHtml + rightTabsHtml() +
     `<div class="gp-head">${t("gpBase")}: <b>${esc(baseBranch)}</b> · #${shortId(a.id)}</div>
      <div class="gp-sec">
        <h4 title="${esc(t("wtTitle"))}">${t("wtPath")}</h4>
@@ -1639,7 +1782,7 @@ function renderGit(){
     catch (e) { alert(t("saveFail") + e); }
   };
   gp.querySelectorAll('[data-fdiff]').forEach(el => el.onclick = () => viewDiff(a.id));
-  bindGitDock();
+  bindGitDock(); bindRightTabs();
 }
 
 // 사이드바/탭 클릭(이벤트 위임) + 새 작업

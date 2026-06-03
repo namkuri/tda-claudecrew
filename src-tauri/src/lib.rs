@@ -1342,27 +1342,39 @@ fn get_timeline(app: AppHandle, id: String) -> Vec<Value> {
 // 이미 같은 라벨의 창이 떠 있으면 그 창을 포커스. Tauri 의 emit은 모든 창으로 broadcast되므로
 // 상태 동기화(agent_update/output/done)는 자동으로 흘러간다.
 #[tauri::command]
-fn open_task_window(app: AppHandle, id: String) -> Result<(), String> {
-    let label = format!("task-{id}");
+fn open_task_window(app: AppHandle, id: String, panel: Option<String>) -> Result<(), String> {
+    // panel = "minimap" | "verify" | None(전체)
+    let panel_str = panel.as_deref().unwrap_or("");
+    let label = if panel_str.is_empty() { format!("task-{id}") } else { format!("task-{id}-{panel_str}") };
     if let Some(existing) = app.get_webview_window(&label) {
         let _ = existing.show();
         let _ = existing.set_focus();
         return Ok(());
     }
-    // 작업 메타로 창 타이틀 만들기
     let title = {
         let state = app.state::<AppState>();
         let agents = state.agents.lock().unwrap();
-        agents.get(&id).map(|a| {
-            let p = a.prompt.lines().next().unwrap_or("").chars().take(60).collect::<String>();
-            if p.is_empty() { format!("ClaudeCrew · {}", a.branch) } else { format!("ClaudeCrew · {}", p) }
-        }).unwrap_or_else(|| format!("ClaudeCrew · {label}"))
+        let base = agents.get(&id).map(|a| {
+            let p = a.prompt.lines().next().unwrap_or("").chars().take(50).collect::<String>();
+            if p.is_empty() { a.branch.clone() } else { p }
+        }).unwrap_or_else(|| label.clone());
+        let suffix = match panel_str {
+            "minimap" => " · 🗺 미니맵",
+            "verify"  => " · 🧪 검증",
+            _ => "",
+        };
+        format!("ClaudeCrew · {base}{suffix}")
     };
-    let url = WebviewUrl::App(format!("index.html?detached=1&taskId={id}").into());
+    let url_str = if panel_str.is_empty() {
+        format!("index.html?detached=1&taskId={id}")
+    } else {
+        format!("index.html?detached=1&taskId={id}&panel={panel_str}")
+    };
+    let url = WebviewUrl::App(url_str.into());
     WebviewWindowBuilder::new(&app, &label, url)
         .title(&title)
-        .inner_size(1100.0, 760.0)
-        .min_inner_size(720.0, 480.0)
+        .inner_size(900.0, 620.0)
+        .min_inner_size(560.0, 380.0)
         .build()
         .map(|_| ())
         .map_err(|e| e.to_string())
