@@ -72,6 +72,9 @@ const I18N = {
     followPh: "추가로 부탁하거나 물어볼 내용… (Enter 보내기 · Shift+Enter 줄바꿈)", followSend: "보내기 ↵",
     noSession: "이 작업은 아직 세션이 시작되지 않아 후속 대화를 보낼 수 없어요.",
     talkingTo: "대화 상대", role_orchestrator: "오케스트레이터", role_team: "팀장(병렬 위임)",
+    prettyTitle: "Pretty 모드 — 도구 호출 그룹 접힘 + Markdown 렌더 + 추론/답변 구분",
+    thinkingLabel: "추론", answerLabel: "답변", expandAll: "모두 펼치기", collapseAll: "모두 접기",
+    scrollDown: "↓ 새 내용 보기",
     wtPath: "작업 공간(worktree)", wtOpen: "📁 폴더 열기", wtTitle: "Git worktree — 원본 폴더와 격리된 별도 작업 공간",
     verify: "🧪 자동 검증", verifying: "검증 중…", verifyPass: "검증 통과", verifyFail: "검증 실패",
     verifySkipped: "감지된 빌드 시스템 없음(검증 생략)", verifyFailedTip: "검증 실패 — 그래도 적용하시려면 다시 누르세요.",
@@ -148,6 +151,9 @@ const I18N = {
     followPh: "Ask a follow-up or give the next step… (Enter to send · Shift+Enter for newline)", followSend: "Send ↵",
     noSession: "No session yet — this task hasn't produced its first response, so follow-up isn't possible.",
     talkingTo: "Talking to", role_orchestrator: "Orchestrator", role_team: "Lead (parallel delegate)",
+    prettyTitle: "Pretty mode — collapse tool-call groups + render Markdown + separate thinking/answer",
+    thinkingLabel: "Thinking", answerLabel: "Answer", expandAll: "Expand all", collapseAll: "Collapse all",
+    scrollDown: "↓ Jump to latest",
     wtPath: "Workspace (worktree)", wtOpen: "📁 Open folder", wtTitle: "Git worktree — an isolated working tree separate from your main folder",
     verify: "🧪 Auto-verify", verifying: "Verifying…", verifyPass: "Verified", verifyFail: "Verification failed",
     verifySkipped: "No detected build system (skipped)", verifyFailedTip: "Verification failed — press Apply again to override.",
@@ -180,6 +186,7 @@ function applyI18n(){
   document.querySelectorAll("[data-i18n-title]").forEach(el => { el.title = t(el.dataset.i18nTitle); });
   const lb = $("#btnLang"); if (lb) lb.textContent = lang === "ko" ? "EN" : "한국어";
   if ($("#repoName")) $("#repoName").textContent = repoBaseName();
+  syncPrettyBtn();
   renderCustomRecipes();
   render();
   const badge = document.querySelector(".demo-badge"); if (badge) badge.textContent = t("demoBadge");
@@ -196,13 +203,16 @@ function makeDemoApi(){
     const ko = lang === "ko";
     const sample = [
       "▶ " + (ko ? "세션 시작 · claude-sonnet-4-6" : "Session start · claude-sonnet-4-6"),
+      "💭 " + (ko ? "먼저 어떤 파일들이 있는지 살펴보고, 가장 의심되는 곳부터 확인해야겠다." : "Let me start by exploring the file structure and the most suspicious area."),
+      "🔧 Glob  🔍 src/**/*.{js,jsx}",
+      "  ↳ src/login.js\n  ↳ src/auth/session.js\n  ↳ src/main.js",
       "🔧 Read  📖 src/login.js",
-      "🔧 Glob  🔍 **/*.test.js",
-      "🔧 Bash  $ npm test --silent",
-      "  ↳ 3 passed, 0 failed",
-      "🔧 Task  🧑‍💼 → debugger  (이벤트 핸들러 누락 추적)",
+      "🔧 Bash  $ wc -l src/login.js src/main.js",
+      "  ↳ 201 src/login.js\n   341 src/main.js\n   542 total",
       "🔧 Edit  ✏️ src/login.js",
-      ko ? "수정을 적용했어요. 검증 통과." : "Applied the fix. Tests pass.",
+      ko
+        ? "## 분석 결과\n\n**문제**: `onLogin` 함수가 click 핸들러를 등록하지 않습니다.\n\n- `addEventListener('click', submit)` 누락\n- `disabled` 속성도 풀어줘야 함\n\n```js\nbtn.addEventListener('click', submit);\nbtn.disabled = false;\n```\n\n수정을 적용하고 `npm test` 로 검증했습니다. *모두 통과* 했어요."
+        : "## Diagnosis\n\n**Issue**: `onLogin` doesn't register a click handler.\n\n- Missing `addEventListener('click', submit)`\n- `disabled` flag not cleared\n\n```js\nbtn.addEventListener('click', submit);\nbtn.disabled = false;\n```\n\nApplied the fix and ran `npm test`. *All passing*.",
     ];
     const id = "demo" + (++n);
     const role = args.team ? "team" : (args.agent || "orchestrator");
@@ -291,6 +301,7 @@ let checkedOk = false, folderOk = !!repoPath, setupOk = localStorage.getItem("cc
 let selectedId = null;          // 현재 선택된 작업(null = 새 작업/컴포저)
 const openTabs = [];            // 열린 탭(작업 id 순서)
 let authMode = localStorage.getItem("cc_authmode") || "subscription"; // subscription(앱 플랜) | api
+let pretty = localStorage.getItem("cc_pretty") === "1"; // Pretty 모드(콘솔 그룹 접힘 + Markdown)
 let baseBranch = "main"; // 저장소의 기본/기준 브랜치 — 작업 선택 시 백엔드가 검출해 채움
 
 function repoBaseName(){
@@ -345,7 +356,148 @@ function markTool(t){
   });
 }
 
+// ─────────────────── Pretty 모드 렌더 ───────────────────
+// 백엔드 emit_output 한 줄당 하나의 line. Pretty 에선:
+//  ① 🔧 로 시작하는 줄 + 이어지는 ↳/들여쓰기 줄 = 한 '도구 호출 그룹'
+//  ② 💭 추론 / ▶/📚/❌ 시스템 / 일반 텍스트(답변) 로 종류 구분
+//  ③ 마지막 그룹만 펼침, 이전 그룹은 한 줄로 접힘(클릭하면 토글)
+//  ④ 답변 텍스트는 간이 Markdown → HTML
+function classifyLine(line){
+  if (/^🔧 /.test(line)) return "tool-head";
+  if (/^\s*↳/.test(line) || /^\s{2,}/.test(line)) return "tool-cont";
+  if (/^💭 /.test(line)) return "thinking";
+  if (/^▶ /.test(line)) return "system";
+  if (/^📚 /.test(line)) return "system";
+  if (/^❌ /.test(line)) return "error";
+  if (/^\$ claude /.test(line) || /^\[알림\] /.test(line)) return "diag";
+  if (/^💬 사용자: /.test(line)) return "user";
+  return "answer";
+}
+function groupLines(output){
+  // output: 문자열 라인 배열. 도구 호출 그룹·답변 블록·추론 블록으로 묶는다.
+  const groups = [];
+  let i = 0;
+  while (i < output.length){
+    const line = output[i] ?? "";
+    const cls = classifyLine(line);
+    if (cls === "tool-head"){
+      const head = line;
+      const cont = [];
+      i++;
+      while (i < output.length && classifyLine(output[i]) === "tool-cont"){
+        cont.push(output[i]); i++;
+      }
+      groups.push({ kind: "tool", head, cont });
+      continue;
+    }
+    if (cls === "thinking" || cls === "answer" || cls === "user"){
+      // 같은 종류 연속 줄을 한 덩어리로
+      const buf = [line]; const k = cls;
+      i++;
+      while (i < output.length && classifyLine(output[i]) === k){
+        buf.push(output[i]); i++;
+      }
+      groups.push({ kind: k, text: buf.join("\n") });
+      continue;
+    }
+    if (cls === "system" || cls === "error" || cls === "diag"){
+      groups.push({ kind: cls, text: line });
+      i++;
+      continue;
+    }
+    // fallback
+    groups.push({ kind: "answer", text: line }); i++;
+  }
+  return groups;
+}
+
+// 매우 가벼운 Markdown → HTML (의존성 없이, 일반 작업에 충분)
+function mdToHtml(src){
+  if (!src) return "";
+  let s = esc(src);
+  // 코드 펜스
+  s = s.replace(/```([a-zA-Z0-9_+\-]*)\n([\s\S]*?)```/g, (_, lang, code) =>
+    `<pre class="md-pre"><code class="lang-${esc(lang)}">${code}</code></pre>`);
+  // 인라인 코드
+  s = s.replace(/`([^`]+)`/g, "<code class=\"md-ic\">$1</code>");
+  // 헤딩
+  s = s.replace(/^###### (.+)$/gm, "<h6>$1</h6>")
+       .replace(/^##### (.+)$/gm, "<h5>$1</h5>")
+       .replace(/^#### (.+)$/gm, "<h4>$1</h4>")
+       .replace(/^### (.+)$/gm, "<h3>$1</h3>")
+       .replace(/^## (.+)$/gm, "<h2>$1</h2>")
+       .replace(/^# (.+)$/gm, "<h1>$1</h1>");
+  // 굵게/기울임
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+       .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
+  // 목록(라인 단위)
+  s = s.replace(/^(\s*)-\s+(.+)$/gm, "$1• $2");
+  // 단순 줄바꿈 보존
+  s = s.replace(/\n/g, "<br/>");
+  // 헤딩 뒤의 <br/> 정리
+  s = s.replace(/<\/h([1-6])><br\/>/g, "</h$1>");
+  s = s.replace(/<\/pre><br\/>/g, "</pre>");
+  return s;
+}
+
+// 그룹을 HTML로
+function renderGroup(g, isLastOpen){
+  if (g.kind === "tool"){
+    const headHtml = markTool(g.head);
+    const hasBody = g.cont && g.cont.length;
+    if (!hasBody) return `<div class="grp grp-tool"><div class="grp-head">${headHtml}</div></div>`;
+    const bodyHtml = esc(g.cont.join("\n"));
+    return `<details class="grp grp-tool" ${isLastOpen ? "open" : ""}>
+      <summary class="grp-head">${headHtml}<span class="grp-meta">${g.cont.length}줄</span></summary>
+      <pre class="grp-body">${bodyHtml}</pre>
+    </details>`;
+  }
+  if (g.kind === "thinking"){
+    const inner = esc(g.text.replace(/^💭 /, ""));
+    return `<details class="grp grp-thinking">
+      <summary><span class="grp-tag">${t("thinkingLabel")}</span><span class="grp-preview">${inner.slice(0, 80)}…</span></summary>
+      <div class="grp-body">${inner}</div>
+    </details>`;
+  }
+  if (g.kind === "user"){
+    return `<div class="grp grp-user">${esc(g.text)}</div>`;
+  }
+  if (g.kind === "system") return `<div class="grp grp-system">${esc(g.text)}</div>`;
+  if (g.kind === "error")  return `<div class="grp grp-error">${esc(g.text)}</div>`;
+  if (g.kind === "diag")   return `<details class="grp grp-diag"><summary>${esc(g.text.slice(0,80))}…</summary><pre class="grp-body">${esc(g.text)}</pre></details>`;
+  // answer — Markdown 렌더
+  return `<div class="grp grp-answer">${mdToHtml(g.text)}</div>`;
+}
+
+function renderConsolePretty(a){
+  const out = a.output || [];
+  if (out.length === 0) return "";
+  const groups = groupLines(out);
+  // 도구 그룹 중 마지막 하나만 펼침, 다른 것들은 접힘
+  // 본문 있는(↳ 결과가 있는) 마지막 도구 그룹만 펼침
+  let lastToolIdx = -1;
+  for (let i = groups.length - 1; i >= 0; i--) {
+    if (groups[i].kind === "tool" && groups[i].cont && groups[i].cont.length) { lastToolIdx = i; break; }
+  }
+  return groups.map((g, i) => renderGroup(g, i === lastToolIdx)).join("\n");
+}
+function renderConsoleRaw(out){
+  return out.map(markTool).join("\n");
+}
+
 // ---------- 언어 토글 ----------
+// Pretty 토글 — 콘솔 라인을 도구 호출 그룹으로 묶어 마지막만 펼침, Markdown 렌더, 추론/답변 구분
+$("#btnPretty").addEventListener("click", () => {
+  pretty = !pretty;
+  localStorage.setItem("cc_pretty", pretty ? "1" : "0");
+  syncPrettyBtn();
+  renderStage();
+});
+function syncPrettyBtn(){
+  const b = $("#btnPretty"); if (!b) return;
+  b.classList.toggle("on", !!pretty);
+}
+
 $("#btnLang").addEventListener("click", () => {
   lang = lang === "ko" ? "en" : "ko";
   localStorage.setItem("cc_lang", lang);
@@ -700,9 +852,9 @@ function renderOrchBar(a){
   const tm = a.teammates; if (!tm || !Object.keys(tm).length) return "";
   const chips = Object.keys(tm).map(name => {
     const m = mate(tm, name);
-    return `<span class="orch-chip ${m.status}">${m.status === "done" ? "✓" : "●"} ${esc(name)}</span>`;
+    return `<span class="orch-chip ${m.status}" title="${esc(name)}">${m.status === "done" ? "✓" : "●"} ${esc(expertLabel(name))}</span>`;
   }).join('<span class="orch-arrow">·</span>');
-  return `<div class="orch-bar"><span class="orch-lead">🧠 ${t("orchestrator")}</span><span class="orch-to">→</span>${chips}</div>`;
+  return `<div class="orch-bar"><span class="orch-lead">${badgeOf("orchestrator").icon} ${esc(t("orchestrator"))}</span><span class="orch-to">→</span>${chips}</div>`;
 }
 
 // 자동 검증 결과 패널 (F1)
@@ -730,6 +882,33 @@ function fmtTime(ms){
   const d = new Date(ms);
   return d.toLocaleTimeString(lang === "ko" ? "ko-KR" : "en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
+// 사용자가 위로 스크롤한 상태인지 추적 — 추적 중이 아니면 자동 스크롤 안 함
+const STICK_BOTTOM_PX = 24;          // 하단에 이만큼 가까우면 'stick' 으로 간주
+const _stickyEls = new WeakSet();    // 자동 추적 중인 요소
+function isAtBottom(el){ return el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_BOTTOM_PX; }
+function bindStickyScroll(el){
+  if (!el || el.__cc_bound) return; el.__cc_bound = true;
+  _stickyEls.add(el);
+  // 컨테이너 부모에 '하단으로' 버튼 하나 부착
+  const parent = el.parentElement;
+  let btn = parent && parent.querySelector(".scroll-down-btn");
+  if (parent && !btn){
+    btn = document.createElement("button");
+    btn.type = "button"; btn.className = "scroll-down-btn hidden";
+    btn.textContent = t("scrollDown");
+    btn.onclick = () => { el.scrollTop = el.scrollHeight; _stickyEls.add(el); btn.classList.add("hidden"); };
+    parent.appendChild(btn);
+  }
+  el.addEventListener("scroll", () => {
+    if (isAtBottom(el)) { _stickyEls.add(el); if (btn) btn.classList.add("hidden"); }
+    else { _stickyEls.delete(el); if (btn) btn.classList.remove("hidden"); }
+  }, { passive: true });
+}
+function stickIfNeeded(el){
+  if (!el) return;
+  if (_stickyEls.has(el)) el.scrollTop = el.scrollHeight;
+}
+
 function fmtDuration(ms){
   if (!ms || ms < 0) return "";
   if (ms < 1000) return ms + "ms";
@@ -771,7 +950,7 @@ function renderSubConsoles(a){
           ? (m.result ? `<div class="sub-result">${esc(m.result)}</div>` : `<div class="sub-result muted">✓ ${esc(t("sub_done"))}</div>`)
           : `<div class="sub-result muted">${esc(t("sub_working"))}</div>`);
     return `<div class="console sub ${cls}">
-      <div class="con-head"><span class="con-dot ${cls}"></span><b>${esc(name)}</b><span class="con-st">${headIcon}</span></div>
+      <div class="con-head"><span class="con-dot ${cls}"></span><b>${esc(expertLabel(name))}</b><span class="con-st">${headIcon}</span></div>
       ${meta ? `<div class="sub-meta">${meta}</div>` : ""}
       ${why}
       ${what}
@@ -785,11 +964,31 @@ function renderSubConsoles(a){
 
 function shortId(id){ const m = String(id).match(/\d+/); return m ? m[0] : String(id).slice(-4); }
 function tabTitle(a){ const s = (a.prompt || a.branch || a.id).trim(); return s.length > 18 ? s.slice(0, 18) + "…" : s; }
+// 전문가별 아이콘·고유 라벨(이름) — UI 어디서나 같은 표식을 쓰도록 한곳에 정의
+const EXPERT_BADGES = {
+  orchestrator:   { icon: "🧠", ko: "오케스트레이터", en: "Orchestrator" },
+  team:           { icon: "🧑‍💼", ko: "팀장(병렬 위임)", en: "Lead (parallel delegate)" },
+  oracle:         { icon: "🔮", ko: "오라클",         en: "Oracle" },
+  librarian:      { icon: "📚", ko: "사서",           en: "Librarian" },
+  implementer:    { icon: "🛠️", ko: "구현가",         en: "Implementer" },
+  debugger:       { icon: "🐞", ko: "디버거",         en: "Debugger" },
+  "code-reviewer":{ icon: "🔍", ko: "코드 리뷰어",    en: "Code reviewer" },
+  plan:           { icon: "📋", ko: "계획가",         en: "Planner" },
+  security:       { icon: "🛡️", ko: "보안가",         en: "Security" },
+};
+function badgeOf(name){
+  const k = (name || "").toString();
+  return EXPERT_BADGES[k] || { icon: "🧑‍💼", ko: k || "전문가", en: k || "Expert" };
+}
+function expertLabel(name){
+  const b = badgeOf(name);
+  return `${b.icon} ${lang === "en" ? b.en : b.ko}`;
+}
 function roleLabel(a){
   const r = a.role || "orchestrator";
-  if (r === "orchestrator") return t("role_orchestrator");
-  if (r === "team") return t("role_team");
-  return r; // 전문가명(debugger, implementer 등)
+  if (r === "orchestrator") return expertLabel("orchestrator");
+  if (r === "team")         return expertLabel("team");
+  return expertLabel(r);
 }
 
 // 상태 → Claude 캐릭터 말풍선
@@ -912,7 +1111,7 @@ function renderStage(){
 function renderAgentView(a){
   const av = $("#agentView");
   const sp = speech(a);
-  const logHtml = (a.output || []).map(markTool).join("\n");
+  const logHtml = pretty ? renderConsolePretty(a) : renderConsoleRaw(a.output || []);
   const hasTeam = a.teammates && Object.keys(a.teammates).length;
   av.innerHTML =
     `<div class="char-strip">
@@ -933,7 +1132,7 @@ function renderAgentView(a){
      <div class="console-area">
        <div class="console main">
          <div class="con-head"><span class="con-dot ${a.status}"></span>${hasTeam ? t("orchestrator") : t("agentConsole")}<span class="con-st">${t("status_" + a.status) || a.status}</span></div>
-         <div class="con-body term" id="term-${a.id}">${
+         <div class="con-body term${pretty ? " pretty" : ""}" id="term-${a.id}">${
            logHtml
              ? logHtml
              : (a.status === "error"
@@ -956,7 +1155,7 @@ function renderAgentView(a){
        <button data-act="stop">${t("avStop")}</button>
        <button data-act="cleanup">${t("avRevert")}</button>
      </div>`;
-  const term = $("#term-" + a.id); if (term) term.scrollTop = term.scrollHeight;
+  const term = $("#term-" + a.id); if (term) { bindStickyScroll(term); term.scrollTop = term.scrollHeight; }
   av.querySelector('[data-act="apply"]').onclick = () => applyChanges(a.id);
   av.querySelector('[data-act="diff"]').onclick = () => viewDiff(a.id);
   av.querySelector('[data-act="stop"]').onclick = () => invoke("stop_agent", { id: a.id });
@@ -1109,7 +1308,17 @@ listen("agent_output", (ev) => {
   (a.output = a.output || []).push(text);
   if (id !== selectedId) return;                 // 안 보이는 탭은 상태만 누적
   const term = document.getElementById("term-" + id);
-  if (term && !wasEmpty) { term.insertAdjacentHTML("beforeend", "\n" + markTool(text)); term.scrollTop = term.scrollHeight; }
+  if (pretty) {
+    // Pretty: 그룹 구조가 바뀌니 전체 재렌더(가벼움 — 마지막 그룹만 펼침 유지)
+    if (term){
+      const wasStuck = _stickyEls.has(term);
+      term.innerHTML = renderConsolePretty(a);
+      if (wasStuck) term.scrollTop = term.scrollHeight;
+    } else renderStage();
+  } else if (term && !wasEmpty) {
+    term.insertAdjacentHTML("beforeend", "\n" + markTool(text));
+    stickIfNeeded(term);
+  }
   else renderStage();                            // 첫 줄이면 대기 문구를 지우고 다시 그림
 });
 listen("agent_done", (ev) => {

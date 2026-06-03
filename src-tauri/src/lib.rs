@@ -1299,6 +1299,8 @@ fn list_agents(app: AppHandle) -> Vec<AgentInfo> {
 // 앱 재시작 후에도 .agentboard/ 아래 worktree 들을 보드에 복원한다(V1.3).
 #[tauri::command]
 fn restore_agents(app: AppHandle, repo: String) -> Vec<AgentInfo> {
+    // 사용자가 수동으로 .agentboard/ 폴더를 지웠을 수 있으므로 먼저 stale 레코드 정리
+    let _ = git(&repo, &["worktree", "prune"]);
     if let Ok(out) = git(&repo, &["worktree", "list", "--porcelain"]) {
         let state = app.state::<AppState>();
         for line in out.lines() {
@@ -1594,15 +1596,21 @@ fn check_cost_cap(app: &AppHandle) {
 #[tauri::command]
 fn cleanup_agent(app: AppHandle, id: String) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let (repo, worktree, pid) = {
+    let (repo, worktree, branch, pid) = {
         let map = state.agents.lock().unwrap();
         let a = map.get(&id).ok_or("없는 작업")?;
-        (a.repo.clone(), a.worktree.clone(), a.pid)
+        (a.repo.clone(), a.worktree.clone(), a.branch.clone(), a.pid)
     };
     if let Some(pid) = pid {
         kill_pid(pid);
     }
+    // 1) worktree 디렉토리 정리 (--force: 변경 있어도)
     let _ = git(&repo, &["worktree", "remove", "--force", &worktree]);
+    // 2) 우리가 만든 보조 브랜치(`ab/<branch>`) 정리 — 다음 동명 작업이 깨지지 않게
+    let ab = format!("ab/{branch}");
+    let _ = git(&repo, &["branch", "-D", &ab]);
+    // 3) stale worktree 레코드 정리(사용자가 수동 삭제했을 때 대비)
+    let _ = git(&repo, &["worktree", "prune"]);
     state.agents.lock().unwrap().remove(&id);
     let _ = app.emit("agent_removed", serde_json::json!({ "id": id }));
     Ok(())

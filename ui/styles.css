@@ -264,6 +264,48 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .av-run .whirl{display:inline-block;color:var(--run);animation:whirl 1s linear infinite;font-size:13px}
 @keyframes whirl{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
 
+/* Pretty 모드 토글 */
+.side-top-actions{display:flex;gap:6px;align-items:center}
+#btnPretty.on{background:var(--claude);color:#1a1410;border-color:var(--claude-d);font-weight:700}
+
+/* '↓ 새 내용 보기' 떠다니는 버튼 */
+.console{position:relative}
+.scroll-down-btn{position:absolute;right:14px;bottom:14px;z-index:5;background:var(--claude);color:#1a1410;border:1px solid var(--claude-d);border-radius:999px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(217,119,87,.35)}
+.scroll-down-btn:hover{filter:brightness(1.08)}
+
+/* Pretty 콘솔 — 그룹 카드 */
+.con-body.pretty{font-family:var(--font);font-size:13px;line-height:1.6;color:var(--ink);padding:14px 16px}
+.con-body.pretty .grp{display:block;margin:6px 0;border-radius:8px}
+.con-body.pretty .grp-head{cursor:pointer;list-style:none;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font-family:var(--mono);font-size:12px;color:var(--ink)}
+.con-body.pretty details.grp-tool[open]>.grp-head{border-bottom-left-radius:0;border-bottom-right-radius:0}
+.con-body.pretty .grp-head::-webkit-details-marker{display:none}
+.con-body.pretty .grp-head::before{content:"▸ ";color:var(--faint);font-family:var(--font)}
+.con-body.pretty details[open]>.grp-head::before{content:"▾ "}
+.con-body.pretty .grp-head .grp-meta{margin-left:8px;color:var(--faint);font-size:10.5px}
+.con-body.pretty .grp-body{margin:0;padding:8px 12px;background:#0b0e11;border:1px solid var(--line);border-top:none;border-radius:0 0 8px 8px;font-family:var(--mono);font-size:12px;color:#aebac4;white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto}
+.con-body.pretty .grp-tool>.grp-head .tool{color:var(--accent)}
+/* 시스템/오류/사용자/추론/답변 색 분리 */
+.con-body.pretty .grp-system{color:var(--dim);font-family:var(--mono);font-size:12px;padding:2px 4px}
+.con-body.pretty .grp-error{color:var(--err);padding:6px 10px;border:1px solid var(--err);border-radius:6px;background:rgba(255,107,107,.06)}
+.con-body.pretty .grp-user{color:var(--claude);font-weight:600;padding:6px 10px;border-left:3px solid var(--claude);background:var(--panel2);border-radius:0 6px 6px 0}
+.con-body.pretty .grp-thinking{opacity:.85}
+.con-body.pretty .grp-thinking>summary{cursor:pointer;list-style:none;padding:4px 10px;background:var(--panel2);border-radius:6px;color:var(--idle);font-size:11.5px}
+.con-body.pretty .grp-thinking>summary::-webkit-details-marker{display:none}
+.con-body.pretty .grp-thinking .grp-tag{display:inline-block;padding:1px 7px;border-radius:999px;background:var(--idle);color:#0a0e1a;font-size:10px;font-weight:700;margin-right:6px}
+.con-body.pretty .grp-thinking .grp-preview{color:var(--faint);font-style:italic}
+.con-body.pretty .grp-thinking>.grp-body{margin-top:4px;color:var(--idle);background:rgba(122,162,255,.06);border-color:var(--idle);font-style:italic;font-family:var(--font)}
+.con-body.pretty .grp-diag{font-family:var(--mono);font-size:11px;color:var(--faint)}
+.con-body.pretty .grp-diag>summary{cursor:pointer}
+.con-body.pretty .grp-diag>.grp-body{font-size:10.5px}
+.con-body.pretty .grp-answer{color:var(--ink);padding:4px 4px}
+/* 답변 안 Markdown */
+.con-body.pretty .grp-answer h1,.con-body.pretty .grp-answer h2,.con-body.pretty .grp-answer h3{margin:.8em 0 .3em;font-weight:700;color:var(--ink)}
+.con-body.pretty .grp-answer h1{font-size:18px} .con-body.pretty .grp-answer h2{font-size:16px} .con-body.pretty .grp-answer h3{font-size:14px}
+.con-body.pretty .grp-answer code.md-ic{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-family:var(--mono);font-size:12px;color:var(--accent)}
+.con-body.pretty .grp-answer pre.md-pre{margin:6px 0;padding:10px;background:#0b0e11;border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:12px;color:#aebac4;overflow:auto}
+.con-body.pretty .grp-answer strong{color:var(--ink)}
+.con-body.pretty .grp-answer em{color:var(--dim)}
+
 /* 오케스트레이터 → 전문가 호출 바 */
 .orch-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-size:12px}
 .orch-lead{color:var(--claude);font-weight:700}
