@@ -139,10 +139,15 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - UI: 부트 시 URL 쿼리 감지 → `html.detached` 클래스 → 사이드바/Git 패널/탭바/온보딩 숨김 → 중앙 풀스크린. selectedId = DETACHED_ID.
   - Tauri emit 은 모든 창에 broadcast → **메인 ↔ 별도 창 상태 자동 동기화**(추가 IPC 불필요).
   - 액션바에 **🪟 별도 창** 버튼. 새 빌드 자동 빌드 중.
-- **다음 회차 — Phase 2~4 of 3-1**:
-  - **P2 도킹/탭 드래그**: 패널 시스템(콘솔/Git/검증/미니맵) + 드래그 도킹 + LocalStorage 영속화.
-  - **P3 시간축 + 재생**: `.cc-timeline.jsonl` 영속화 + UI 슬라이더 + 재생/돌려감기.
-  - **P4 Git 미니맵**: 디렉토리 트리 시각화 + 에이전트 행동(읽기/쓰기/검색/실행) 아이콘 오버레이.
+- **시간축 재생 + Git 미니맵(v0.12.0 — Phase 3/4·4/4 of 3-1)**:
+  - **P3 타임라인 영속화**: `emit_output`이 worktree의 `.cc-timeline.jsonl`에 `{t, text}` 한 줄씩 append. `get_timeline(id)` 커맨드로 UI 로드.
+  - **P3 시간축 슬라이더**: 에이전트 뷰 하단에 ▶/⏸·⏮·range·속도(1/2/4×)·LIVE 컨트롤. LIVE 모드(자동 따라감) ↔ scrub 위치까지의 output만 표시. `_timeline[id]` 상태로 작업별 재생 위치 보존. `visibleOutput(a)`이 cut-off 적용.
+  - **P4 미니맵 패널 탭**: 메인 콘솔 헤드에 콘솔 ↔ 🗺 미니맵 전환. 백엔드 추가 없이 UI가 `_activityRe` 정규식으로 output 파싱 → Read/Write/Edit는 파일 트리(`buildFileTree`), Glob/Grep/Bash는 카운트. 좌: 디렉토리 트리(폴더 우선 정렬·마지막 활동 아이콘·반복 카운트 ×N), 우: 최근 30개 활동 로그.
+  - **시간축↔미니맵 연동**: 슬라이더로 과거 시점 이동 시 미니맵도 그 시점까지의 활동만 표시(scrub→`_aForRender.output` 슬라이스→미니맵 재계산).
+  - 데모 검증: 트리 `src/login.js`(Read+Edit ×2), 기타 `🔍1 🔎0 💻1`, 슬라이더 3으로 이동 시 트리 비어짐.
+
+- **다음 회차 — Phase 2 of 3-1**:
+  - **P2 도킹/탭 드래그**: 패널 시스템(콘솔/Git/검증/미니맵) + 드래그 도킹 + LocalStorage 영속화. 현재 미니맵·검증·콘솔이 모두 패널화되어 있어 P2가 이를 자유 배치하게 만드는 단계.
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.

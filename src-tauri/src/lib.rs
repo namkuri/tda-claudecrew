@@ -1076,7 +1076,7 @@ fn process_teammates(app: &AppHandle, agent_id: &str, evt: &Value, map: &mut Has
 fn emit_output(app: &AppHandle, id: &str, text: &str) {
     note_port(app, id, text);
     // 메모리 + 디스크에 누적(복원용). 매우 큰 작업은 잘림 방지 위해 5000줄/줄당 4KB 상한.
-    {
+    let worktree = {
         let state = app.state::<AppState>();
         let mut agents = state.agents.lock().unwrap();
         if let Some(a) = agents.get_mut(id) {
@@ -1085,12 +1085,30 @@ fn emit_output(app: &AppHandle, id: &str, text: &str) {
             if a.output.len() > 5000 { let drop = a.output.len() - 5000; a.output.drain(..drop); }
             // 디스크 저장은 5줄마다(쓰기 비용 감소)
             if a.output.len() % 5 == 0 { save_agent_state(a); }
-        }
+            a.worktree.clone()
+        } else { String::new() }
+    };
+    // 타임라인 영속화(P3): .agentboard/<branch>/.cc-timeline.jsonl 에 한 줄씩 append.
+    // 슬라이더로 과거 시점 보기 + 재생/돌려감기에 사용.
+    if !worktree.is_empty() {
+        append_timeline(&worktree, text);
     }
     let _ = app.emit(
         "agent_output",
         serde_json::json!({ "id": id, "text": text }),
     );
+}
+
+fn append_timeline(worktree: &str, text: &str) {
+    use std::io::Write;
+    let ts: i64 = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64).unwrap_or(0);
+    let line: String = text.chars().take(4000).collect();
+    let event = serde_json::json!({ "t": ts, "text": line });
+    let path = PathBuf::from(worktree).join(".cc-timeline.jsonl");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "{}", event);
+    }
 }
 
 // 출력 줄에서 dev 서버 포트(localhost:NNNN)를 best-effort로 뽑는다.
@@ -1285,6 +1303,19 @@ fn open_path(app: AppHandle, path: String) -> Result<(), String> {
     app.opener()
         .open_path(path, None::<&str>)
         .map_err(|e| e.to_string())
+}
+
+// ---------------- 커맨드: 작업 타임라인 조회 (P3 시간축 재생용) ----------------
+// .cc-timeline.jsonl 의 각 줄을 파싱해 [{t, text}, ...] 로 돌려준다.
+// UI는 슬라이더로 t 기준 cut-off 만들어 그 시점까지의 텍스트만 그릴 수 있음.
+#[tauri::command]
+fn get_timeline(app: AppHandle, id: String) -> Vec<Value> {
+    let state = app.state::<AppState>();
+    let worktree = state.agents.lock().unwrap().get(&id).map(|a| a.worktree.clone()).unwrap_or_default();
+    if worktree.is_empty() { return Vec::new(); }
+    let path = PathBuf::from(&worktree).join(".cc-timeline.jsonl");
+    let Ok(text) = std::fs::read_to_string(&path) else { return Vec::new(); };
+    text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).collect()
 }
 
 // ---------------- 커맨드: 작업을 별도 창으로 띄움(멀티 윈도우) ----------------
@@ -1837,7 +1868,8 @@ pub fn run() {
             open_path,
             get_base_branch,
             verify_changes,
-            open_task_window
+            open_task_window,
+            get_timeline
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

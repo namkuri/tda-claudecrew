@@ -10,6 +10,100 @@ const { invoke, listen, dialog } = DEMO
   : { invoke: window.__TAURI__.core.invoke, listen: window.__TAURI__.event.listen, dialog: window.__TAURI__.dialog };
 if (DEMO) console.warn("[ClaudeCrew] Demo mode (no Tauri backend) — using mock data. Real install runs as the desktop app.");
 
+// ── P4: 메인 콘솔의 패널 탭 ('console' | 'map') ──
+const _pane = {};
+function setPane(id, p){ _pane[id] = p; renderStage(); }
+
+// output 라인을 파싱해 활동(파일/검색/명령)을 시간 순서대로 추출
+// → { tree: { ".": { children: {...} }}, activities: [{ kind, path, label, idx }] }
+const _activityRe = {
+  Read:  /^🔧 Read\s+📖\s+(.+)$/,
+  Write: /^🔧 Write\s+✍️\s+(.+)$/,
+  Edit:  /^🔧 Edit\s+✏️\s+(.+)$/,
+  Glob:  /^🔧 Glob\s+🔍\s+(.+)$/,
+  Grep:  /^🔧 Grep\s+🔎\s+(.+?)(?:\s+\(|$)/,
+  Bash:  /^🔧 (?:Bash|PowerShell)\s+\$\s+(.+)$/,
+};
+function extractActivities(lines){
+  const acts = [];
+  lines.forEach((line, idx) => {
+    for (const [kind, re] of Object.entries(_activityRe)){
+      const m = re.exec(line);
+      if (m){ acts.push({ kind, target: m[1], idx }); return; }
+    }
+  });
+  return acts;
+}
+function activityIcon(kind){
+  return { Read: "📖", Write: "✍️", Edit: "✏️", Glob: "🔍", Grep: "🔎", Bash: "💻", PowerShell: "💻" }[kind] || "🔧";
+}
+function buildFileTree(acts){
+  // 파일류(Read/Write/Edit) 만 디렉토리 트리. Glob/Grep/Bash는 따로.
+  const root = { children: {}, _acts: [] };
+  acts.forEach(a => {
+    if (!["Read","Write","Edit"].includes(a.kind)) return;
+    const parts = String(a.target).split(/[\\/]/).filter(Boolean);
+    let node = root;
+    parts.forEach((p, i) => {
+      node.children[p] = node.children[p] || { children: {}, _acts: [], isFile: i === parts.length - 1 };
+      node = node.children[p];
+    });
+    node._acts.push(a);
+  });
+  return root;
+}
+function renderTree(node, indent=0){
+  const entries = Object.entries(node.children).sort(([a, av], [b, bv]) => {
+    // 폴더 먼저, 그 다음 파일
+    const af = av.isFile ? 1 : 0, bf = bv.isFile ? 1 : 0;
+    return af - bf || a.localeCompare(b);
+  });
+  return entries.map(([name, child]) => {
+    const last = child._acts[child._acts.length - 1];
+    const icon = last ? activityIcon(last.kind) : (child.isFile ? "📄" : "📁");
+    const count = child._acts.length > 1 ? `<span class="mm-count">×${child._acts.length}</span>` : "";
+    const childHtml = Object.keys(child.children).length ? `<div class="mm-children">${renderTree(child, indent + 1)}</div>` : "";
+    return `<div class="mm-node ${child.isFile ? "file" : "dir"}"><span class="mm-icon">${icon}</span><span class="mm-name">${esc(name)}</span>${count}${childHtml}</div>`;
+  }).join("");
+}
+function renderMinimap(a){
+  const acts = extractActivities(a.output || []);
+  if (acts.length === 0) return `<div class="mm-empty">${esc(t("minimapEmpty"))}</div>`;
+  const tree = buildFileTree(acts);
+  const treeHtml = renderTree(tree);
+  // 시간순 활동 로그(우측)
+  const logHtml = acts.slice(-30).reverse().map(act =>
+    `<div class="mm-log-row"><span class="mm-icon">${activityIcon(act.kind)}</span> <code>${esc(act.target.slice(0,80))}</code> <span class="mm-kind">${esc(act.kind)}</span></div>`).join("");
+  // 다른 도구(Glob/Grep/Bash)는 간단 요약
+  const others = acts.filter(a => ["Glob","Grep","Bash","PowerShell"].includes(a.kind));
+  const otherCount = ["Glob","Grep","Bash"].map(k => `${activityIcon(k)} ${others.filter(o => o.kind === k).length}`).join("  ");
+  return `<div class="mm-grid">
+    <div class="mm-tree">
+      <div class="mm-head">${esc(t("minimapTree"))}</div>
+      ${treeHtml || `<div class="mm-empty-sub">${esc(t("minimapNoFiles"))}</div>`}
+      <div class="mm-other">${otherCount}</div>
+    </div>
+    <div class="mm-log">
+      <div class="mm-head">${esc(t("minimapLog"))} <span class="mm-count">${acts.length}</span></div>
+      ${logHtml}
+    </div>
+  </div>`;
+}
+
+// ── P3: 시간축 — agent별 재생 상태 (slider 위치, 재생 여부, 속도) ──
+// scrub === null 이면 LIVE 모드(실시간 따라감). 숫자면 해당 인덱스까지의 output만 표시.
+const _timeline = {};        // id → { scrub: null|int, playing: bool, speed: 1|2|4, _timer?: number }
+function tlState(id){
+  if (!_timeline[id]) _timeline[id] = { scrub: null, playing: false, speed: 1 };
+  return _timeline[id];
+}
+function visibleOutput(a){
+  const out = a.output || [];
+  const s = tlState(a.id);
+  if (s.scrub == null) return out;          // LIVE
+  return out.slice(0, Math.max(0, Math.min(out.length, s.scrub)));
+}
+
 // ── 멀티 윈도우: URL ?detached=1&taskId=<id> 면 단일 작업 풀스크린 모드 ──
 const _qs = new URLSearchParams(location.search);
 const DETACHED = _qs.get("detached") === "1";
@@ -82,6 +176,10 @@ const I18N = {
     thinkingLabel: "추론", answerLabel: "답변", expandAll: "모두 펼치기", collapseAll: "모두 접기",
     scrollDown: "↓ 새 내용 보기",
     popout: "🪟 별도 창", popoutTitle: "이 작업만 별도 창으로 분리해서 보기",
+    tlPlay: "재생/일시정지", tlBack: "처음으로", tlLive: "라이브",
+    minimapTab: "미니맵", minimapTree: "📁 디렉토리(에이전트 활동)", minimapLog: "⏱ 활동 로그(최근 30)",
+    minimapEmpty: "아직 도구 활동이 없어요. 작업이 시작되면 여기에 표시됩니다.",
+    minimapNoFiles: "(아직 파일 접근 없음)",
     wtPath: "작업 공간(worktree)", wtOpen: "📁 폴더 열기", wtTitle: "Git worktree — 원본 폴더와 격리된 별도 작업 공간",
     verify: "🧪 자동 검증", verifying: "검증 중…", verifyPass: "검증 통과", verifyFail: "검증 실패",
     verifySkipped: "감지된 빌드 시스템 없음(검증 생략)", verifyFailedTip: "검증 실패 — 그래도 적용하시려면 다시 누르세요.",
@@ -162,6 +260,10 @@ const I18N = {
     thinkingLabel: "Thinking", answerLabel: "Answer", expandAll: "Expand all", collapseAll: "Collapse all",
     scrollDown: "↓ Jump to latest",
     popout: "🪟 Pop out", popoutTitle: "Open this task in its own window",
+    tlPlay: "Play/Pause", tlBack: "Rewind", tlLive: "LIVE",
+    minimapTab: "Minimap", minimapTree: "📁 Directory (agent activity)", minimapLog: "⏱ Recent activity (30)",
+    minimapEmpty: "No tool activity yet. It'll appear here once the agent starts working.",
+    minimapNoFiles: "(no file access yet)",
     wtPath: "Workspace (worktree)", wtOpen: "📁 Open folder", wtTitle: "Git worktree — an isolated working tree separate from your main folder",
     verify: "🧪 Auto-verify", verifying: "Verifying…", verifyPass: "Verified", verifyFail: "Verification failed",
     verifySkipped: "No detected build system (skipped)", verifyFailedTip: "Verification failed — press Apply again to override.",
@@ -876,6 +978,27 @@ function renderOrchBar(a){
 }
 
 // 자동 검증 결과 패널 (F1)
+// 시간축 — 슬라이더(0~output.length) + 재생/일시정지/속도/LIVE 복귀
+function renderTimelineBar(a){
+  const total = (a.output || []).length;
+  if (total < 2) return ""; // 짧으면 의미 없음
+  const s = tlState(a.id);
+  const pos = s.scrub == null ? total : s.scrub;
+  const live = s.scrub == null;
+  return `<div class="tlbar">
+    <button class="tlbtn" data-tl="play" title="${esc(t("tlPlay"))}">${s.playing ? "⏸" : "▶"}</button>
+    <button class="tlbtn" data-tl="back" title="${esc(t("tlBack"))}">⏮</button>
+    <input class="tlrange" type="range" min="0" max="${total}" value="${pos}" data-tl="range"/>
+    <span class="tlpos">${pos}/${total}</span>
+    <select class="tlspeed" data-tl="speed">
+      <option value="1" ${s.speed === 1 ? "selected" : ""}>1×</option>
+      <option value="2" ${s.speed === 2 ? "selected" : ""}>2×</option>
+      <option value="4" ${s.speed === 4 ? "selected" : ""}>4×</option>
+    </select>
+    <button class="tlbtn ${live ? "live" : ""}" data-tl="live" title="${esc(t("tlLive"))}">${live ? "● LIVE" : t("tlLive")}</button>
+  </div>`;
+}
+
 function renderVerifyPanel(a){
   const v = a._verify; if (!v) return "";
   const head = v.ran
@@ -1129,7 +1252,9 @@ function renderStage(){
 function renderAgentView(a){
   const av = $("#agentView");
   const sp = speech(a);
-  const logHtml = pretty ? renderConsolePretty(a) : renderConsoleRaw(a.output || []);
+  const _vo = visibleOutput(a);
+  const _aForRender = { ...a, output: _vo };
+  const logHtml = pretty ? renderConsolePretty(_aForRender) : renderConsoleRaw(_vo);
   const hasTeam = a.teammates && Object.keys(a.teammates).length;
   av.innerHTML =
     `<div class="char-strip">
@@ -1149,17 +1274,27 @@ function renderAgentView(a){
      ${renderOrchBar(a)}
      <div class="console-area">
        <div class="console main">
-         <div class="con-head"><span class="con-dot ${a.status}"></span>${hasTeam ? t("orchestrator") : t("agentConsole")}<span class="con-st">${t("status_" + a.status) || a.status}</span></div>
-         <div class="con-body term${pretty ? " pretty" : ""}" id="term-${a.id}">${
-           logHtml
-             ? logHtml
-             : (a.status === "error"
-                 ? `<span style="color:var(--err)">❌ ${esc(t("noDiagInfo"))}</span>\n<span style="color:var(--dim)">${esc(t("noDiagHints"))}</span>`
-                 : `<span style="color:var(--faint)">${esc(t("termWaiting"))}</span>`)
-         }</div>
+         <div class="con-head">
+           <span class="con-dot ${a.status}"></span>
+           <div class="pane-tabs">
+             <button class="pane-tab ${(_pane[a.id] || "console") === "console" ? "on" : ""}" data-pane="console">${esc(hasTeam ? t("orchestrator") : t("agentConsole"))}</button>
+             <button class="pane-tab ${_pane[a.id] === "map" ? "on" : ""}" data-pane="map">🗺 ${esc(t("minimapTab"))}</button>
+           </div>
+           <span class="con-st">${t("status_" + a.status) || a.status}</span>
+         </div>
+         ${(_pane[a.id] || "console") === "console"
+           ? `<div class="con-body term${pretty ? " pretty" : ""}" id="term-${a.id}">${
+               logHtml
+                 ? logHtml
+                 : (a.status === "error"
+                     ? `<span style="color:var(--err)">❌ ${esc(t("noDiagInfo"))}</span>\n<span style="color:var(--dim)">${esc(t("noDiagHints"))}</span>`
+                     : `<span style="color:var(--faint)">${esc(t("termWaiting"))}</span>`)
+             }</div>`
+           : `<div class="con-body minimap" id="map-${a.id}">${renderMinimap(_aForRender)}</div>`}
        </div>
        ${renderSubConsoles(a)}
      </div>
+     ${renderTimelineBar(a)}
      <div class="follow-up">
        <textarea id="followUp-${a.id}" rows="2" placeholder="${esc(t("followPh"))}" ${a.status === "running" || a.status === "creating" ? "disabled" : ""}></textarea>
        <button class="btn go" data-act="send" ${a.status === "running" || a.status === "creating" || !a.session_id ? "disabled" : ""} title="${a.session_id ? "" : esc(t("noSession"))}">${t("followSend")}</button>
@@ -1181,6 +1316,46 @@ function renderAgentView(a){
   av.querySelector('[data-act="cleanup"]').onclick = () => { if (confirm(t("cleanupConfirm"))) invoke("cleanup_agent", { id: a.id }); };
   const popoutBtn = av.querySelector('[data-act="popout"]');
   if (popoutBtn) popoutBtn.onclick = () => { invoke("open_task_window", { id: a.id }).catch(e => alert(t("opFail") + e)); };
+
+  // 패널 탭(콘솔/미니맵)
+  av.querySelectorAll('[data-pane]').forEach(btn => {
+    btn.onclick = () => setPane(a.id, btn.dataset.pane);
+  });
+
+  // ── 시간축 컨트롤 ──
+  const s = tlState(a.id);
+  const range = av.querySelector('[data-tl="range"]');
+  const play  = av.querySelector('[data-tl="play"]');
+  const back  = av.querySelector('[data-tl="back"]');
+  const live  = av.querySelector('[data-tl="live"]');
+  const speed = av.querySelector('[data-tl="speed"]');
+  const stopPlay = () => { if (s._timer) { clearInterval(s._timer); s._timer = null; } s.playing = false; };
+  if (range) range.oninput = (e) => {
+    const val = parseInt(e.target.value, 10);
+    s.scrub = (val >= (a.output || []).length) ? null : val;
+    stopPlay(); renderStage();
+  };
+  if (play) play.onclick = () => {
+    if (s.playing) { stopPlay(); renderStage(); return; }
+    // 끝에 있으면 처음부터
+    const max = (a.output || []).length;
+    if (s.scrub == null || s.scrub >= max) s.scrub = 0;
+    s.playing = true;
+    s._timer = setInterval(() => {
+      const cur = state.get(a.id); if (!cur) { stopPlay(); return; }
+      const max2 = (cur.output || []).length;
+      s.scrub = Math.min(max2, (s.scrub || 0) + 1);
+      if (s.scrub >= max2) { s.scrub = null; stopPlay(); }
+      renderStage();
+    }, Math.max(60, 600 / (s.speed || 1)));
+    renderStage();
+  };
+  if (back) back.onclick = () => { stopPlay(); s.scrub = 0; renderStage(); };
+  if (live) live.onclick = () => { stopPlay(); s.scrub = null; renderStage(); };
+  if (speed) speed.onchange = (e) => {
+    s.speed = parseInt(e.target.value, 10) || 1;
+    if (s.playing) { stopPlay(); play.click(); } // 새 속도로 재시작
+  };
   const verifyBtn = av.querySelector('[data-act="verify"]');
   if (verifyBtn) verifyBtn.onclick = async () => {
     a._verifying = true; renderStage();

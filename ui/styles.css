@@ -374,6 +374,40 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .follow-up textarea{flex:1;background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-family:var(--font);font-size:13px;resize:none;outline:none;line-height:1.45}
 .follow-up textarea:focus{border-color:var(--accent-d)}
 .follow-up textarea:disabled{opacity:.45;cursor:not-allowed}
+
+/* 시간축(P3) */
+.tlbar{display:flex;align-items:center;gap:8px;padding:8px 16px;border-top:1px solid var(--line);background:var(--panel2);font-size:12px}
+.tlbtn{background:transparent;border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:3px 9px;font-size:12px;cursor:pointer;font-family:var(--font);min-width:34px}
+.tlbtn:hover{border-color:var(--accent-d)}
+.tlbtn.live{background:var(--run);color:#2a1800;border-color:var(--run);font-weight:700;animation:pulse 1.6s infinite}
+.tlrange{flex:1;accent-color:var(--accent);min-width:80px}
+.tlpos{font-family:var(--mono);font-size:11px;color:var(--dim);min-width:60px;text-align:center}
+.tlspeed{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:3px 5px;font-size:11px;font-family:var(--font)}
+
+/* 메인 콘솔의 패널 탭(콘솔/미니맵) */
+.pane-tabs{display:flex;gap:3px;margin:0 8px}
+.pane-tab{background:transparent;border:none;color:var(--dim);font-size:12px;padding:4px 10px;border-radius:6px;cursor:pointer;font-family:var(--font)}
+.pane-tab:hover{color:var(--ink);background:rgba(255,255,255,.04)}
+.pane-tab.on{background:var(--bg);color:var(--ink);font-weight:600}
+
+/* 미니맵 (P4) */
+.con-body.minimap{padding:0;background:var(--bg)}
+.mm-grid{display:grid;grid-template-columns:1fr 1fr;height:100%;min-height:280px}
+.mm-tree,.mm-log{padding:10px 14px;overflow:auto;font-size:12px}
+.mm-tree{border-right:1px solid var(--line)}
+.mm-head{font-weight:700;color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.4px;padding:4px 0 8px;border-bottom:1px solid var(--line);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.mm-node{display:block;padding:2px 0;color:var(--ink)}
+.mm-node.dir{font-weight:600;color:var(--accent)}
+.mm-node .mm-icon{display:inline-block;width:1.6em;text-align:center}
+.mm-node .mm-name{font-family:var(--mono);font-size:12px}
+.mm-count{color:var(--faint);font-size:10.5px;margin-left:4px;font-family:var(--mono)}
+.mm-children{padding-left:18px;border-left:1px dashed var(--line);margin-left:6px;margin-top:2px}
+.mm-other{margin-top:10px;padding-top:8px;border-top:1px solid var(--line);color:var(--dim);font-family:var(--mono);font-size:11px;display:flex;gap:14px}
+.mm-log-row{padding:3px 0;color:var(--ink);font-family:var(--mono);font-size:11.5px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--line)}
+.mm-log-row code{background:var(--panel2);padding:1px 6px;border-radius:4px;color:var(--accent);font-size:11px}
+.mm-log-row .mm-kind{margin-left:auto;color:var(--faint);font-size:10px}
+.mm-empty,.mm-empty-sub{color:var(--faint);padding:24px 0;text-align:center}
+@media(max-width:1100px){ .mm-grid{grid-template-columns:1fr;grid-template-rows:1fr 1fr} .mm-tree{border-right:none;border-bottom:1px solid var(--line)} }
 .follow-up .btn.go{padding:9px 18px;font-size:13px;flex:none;align-self:stretch}
 
 /* 최하단 상태바 */
