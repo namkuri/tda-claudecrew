@@ -117,15 +117,34 @@ function renderMinimap(a, opts){
     const last = lastAct.target.split(/[\\/]/).filter(Boolean).pop();
     return layout.nodes.findIndex(n => n.isFile && n.name === last);
   })();
-  // 부모 에이전트 배지(작업의 role) — 마지막 활동 노드 위에 떠있음
+  // 에이전트 배지 — 활동 path 따라 이동(SMIL animateTransform).
+  // 마지막 N개의 활동 좌표를 시퀀스화하여 자연스러운 흐름 애니메이션.
   const agentBadge = (() => {
     if (lastFileIdx < 0) return "";
-    const n = layout.nodes[lastFileIdx];
     const b = badgeOf(a.role || "orchestrator");
-    return `<g class="mm-agent" transform="translate(${n.x + 200}, ${n.y - 4})">
+    // 최근 활동들의 노드 좌표 시퀀스 — 파일이 아닌 활동은 부모 디렉터리 노드로 폴백
+    const seq = (() => {
+      const recentActs = acts.slice(-Math.min(12, acts.length));
+      const coords = [];
+      for (const act of recentActs) {
+        const last = (act.target || "").split(/[\\/]/).filter(Boolean).pop();
+        if (!last) continue;
+        let node = layout.nodes.find(n => n.isFile && n.name === last);
+        if (!node) node = layout.nodes.find(n => !n.isFile && n.name === last);
+        if (!node && layout.nodes.length) node = layout.nodes[lastFileIdx >= 0 ? lastFileIdx : 0];
+        if (node) coords.push(`${node.x + 200},${node.y - 4}`);
+      }
+      // 단일 좌표면 시작·끝 동일로 두 번 — SMIL이 values 1개면 멈춤
+      if (coords.length === 1) coords.push(coords[0]);
+      return coords;
+    })();
+    const pathStr = seq.join(";");
+    const dur = Math.max(2.5, seq.length * 0.7); // 활동 하나당 ≈0.7s
+    return `<g class="mm-agent">
       <circle r="13" cx="0" cy="13" fill="var(--claude)" />
       <text x="0" y="18" text-anchor="middle" font-size="13">${b.icon}</text>
       <text x="-18" y="9" text-anchor="end" font-size="9" fill="var(--ink)">${esc(b[lang === "en" ? "en" : "ko"])}</text>
+      <animateTransform attributeName="transform" type="translate" values="${pathStr}" keyTimes="${seq.map((_,i)=>(i/(seq.length-1)).toFixed(3)).join(";")}" dur="${dur}s" repeatCount="indefinite" calcMode="spline" keySplines="${seq.slice(1).map(()=>"0.4 0 0.6 1").join(";")}" />
     </g>`;
   })();
 
@@ -249,6 +268,8 @@ const I18N = {
     reloginClose: "닫기",
     reloginVerifyOk: "✓ 자격증명 파일을 확인했어요. 새로고침합니다…",
     reloginVerifyFail: "아직 자격증명 파일을 못 찾았어요. 2단계 /login을 마쳐주세요.",
+    sub_result_more: "전체 결과 보기",
+    sub_stats_hint: "결과 텍스트에서 추정한 활동 — 서브에이전트 내부 도구 호출은 SDK가 노출하지 않습니다.",
     demoBadge: "🖥️ 데모 모드 — 화면 미리보기예요. 실제 작업(파일 수정·저장)은 데스크톱 앱에서 동작해요.",
     demoCheck: "데모 모드 (브라우저 미리보기)", demoSetup: "데모: 실제 설치는 데스크톱 앱에서 진행됩니다.", demoCommit: "데모: 실제 저장(commit)은 데스크톱 앱에서 됩니다.",
     rfNeedName: "이름과 부탁 문구를 적어주세요.", rfSaved: "레시피를 저장했어요.", rfDeleted: "레시피를 삭제했어요.",
@@ -353,6 +374,8 @@ const I18N = {
     reloginClose: "Close",
     reloginVerifyOk: "✓ Credentials file found. Reloading…",
     reloginVerifyFail: "Credentials file not yet present. Please complete /login first.",
+    sub_result_more: "Show full result",
+    sub_stats_hint: "Estimated from the result text — actual sub-agent tool calls are not exposed by the SDK.",
     demoBadge: "🖥️ Demo mode — this is a UI preview. Real work (editing/saving files) runs in the desktop app.",
     demoCheck: "Demo mode (browser preview)", demoSetup: "Demo: real install happens in the desktop app.", demoCommit: "Demo: real saving (commit) happens in the desktop app.",
     rfNeedName: "Please enter a name and request text.", rfSaved: "Recipe saved.", rfDeleted: "Recipe deleted.",
@@ -436,6 +459,8 @@ I18N.ja = {
   reloginClose: "閉じる",
   reloginVerifyOk: "✓ 認証ファイルを確認しました。再読込します…",
   reloginVerifyFail: "認証ファイルがまだありません。/login を完了してください。",
+  sub_result_more: "完全な結果を表示",
+  sub_stats_hint: "結果テキストから推定 — 内部ツール呼び出しは SDK が非公開。",
   minimapTab: "ミニマップ", verifyTab: "検証",
   tlPlay: "再生/一時停止", tlBack: "最初へ", tlLive: "ライブ",
   popout: "🪟 別ウィンドウ",
@@ -1509,10 +1534,34 @@ function renderSubConsoles(a){
     // '왜' = description, '무엇' = prompt(있으면 표시), '결과' = result
     const why = m.desc ? `<div class="sub-why" title="${esc(t("sub_why"))}">${esc(t("sub_why_lbl"))}: ${esc(m.desc)}</div>` : "";
     const what = m.prompt ? `<details class="sub-what"><summary>${esc(t("sub_what_lbl"))}</summary><pre>${esc(m.prompt)}</pre></details>` : "";
+    // 결과 텍스트 분석 — 도구 사용은 sub-agent 내부라 노출 안 됨. 대신 결과 텍스트에서
+    // 코드 펜스/파일 경로/명령 등을 카운트해 "이 정도 일을 했어요" 추정 메타로 보여줌.
+    const stats = (() => {
+      if (!m.result || typeof m.result !== "string") return null;
+      const text = m.result;
+      const fences = (text.match(/```/g) || []).length / 2 | 0;
+      const files = (text.match(/[\w.\-/\\]+\.(?:js|jsx|ts|tsx|py|rs|go|java|css|html|md|json|yml|yaml|toml|sh|sql)\b/gi) || []).length;
+      const cmds = (text.match(/^\$\s+\S|^\s*```(?:bash|sh|powershell|ps1)/gim) || []).length;
+      const lines = text.split("\n").length;
+      const chars = text.length;
+      return { fences, files, cmds, lines, chars };
+    })();
+    const statsBar = stats ? `<div class="sub-stats" title="${esc(t("sub_stats_hint") || "결과 텍스트에서 추정한 활동 — 실제 서브에이전트 내부 도구 호출은 SDK가 노출하지 않습니다.")}">
+      <span>📝 ${stats.chars}자 · ${stats.lines}줄</span>
+      ${stats.fences ? `<span>📦 코드 블록 ${stats.fences}</span>` : ""}
+      ${stats.files ? `<span>📄 파일 언급 ${stats.files}</span>` : ""}
+      ${stats.cmds ? `<span>💻 명령 ${stats.cmds}</span>` : ""}
+    </div>` : "";
+    // result는 Markdown 렌더(긴 결과는 details로 접힘) + 메타 띠
+    const resultBody = m.result
+      ? (m.result.length > 400
+          ? `<details class="sub-result-full"><summary>${esc(t("sub_result_more") || "전체 결과 보기")}</summary><div class="sub-md">${mdToHtml(m.result)}</div></details><div class="sub-md sub-md-preview">${mdToHtml(m.result.slice(0, 280) + "…")}</div>`
+          : `<div class="sub-md">${mdToHtml(m.result)}</div>`)
+      : "";
     const resultHtml = m.isError
       ? `<div class="sub-result err">❌ ${esc(m.result || t("sub_failed"))}</div>`
       : (m.status === "done"
-          ? (m.result ? `<div class="sub-result">${esc(m.result)}</div>` : `<div class="sub-result muted">✓ ${esc(t("sub_done"))}</div>`)
+          ? (m.result ? `<div class="sub-result">${statsBar}${resultBody}</div>` : `<div class="sub-result muted">✓ ${esc(t("sub_done"))}</div>`)
           : `<div class="sub-result muted">${esc(t("sub_working"))}</div>`);
     return `<div class="console sub ${cls}">
       <div class="con-head"><span class="con-dot ${cls}"></span><b>${esc(expertLabel(name))}</b><span class="con-st">${headIcon}</span></div>
