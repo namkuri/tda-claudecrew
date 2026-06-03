@@ -157,6 +157,11 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **비동기 enterApp**: `check_claude`/`get_cost_cap`/`check_api_mode`/`loadAgents`/`refreshUsage`를 `Promise.allSettled`로 병렬. 화면이 즉시 응답하고 컴포저 입력 가능. 우상단에 떠다니는 **부트 토스트**(스피너 + "준비 중…"/"이전 작업 복원 중…"). 완료 자동 숨김.
   - **detached 양방향**: 별도 창에서 보던 작업이 메인에서 `agent_removed`로 제거되면 친화 메시지 "⚠ 이 작업이 메인에서 제거되었어요. 창을 닫아도 좋아요."
   - **분할 패널 모드**: 메인 콘솔 헤더에 **⊟ 분할** 탭 추가 — 콘솔(좌)과 미니맵(우) 동시 표시. `cc_pane_<id>` localStorage 영속화. 좁은 창에서는 자동 상하 분할.
+- **앱 내 재로그인 도우미(v0.18.0)**:
+  - **`open_login_terminal` 커맨드**: Windows `cmd /K claude` 새 콘솔 / macOS `osascript Terminal.app` / Linux `x-terminal-emulator → gnome-terminal → konsole → xterm` 폴백. 새 창에 Claude REPL 띄워 사용자가 `/login` 직접 입력 → 브라우저 OAuth 자동.
+  - **`verify_claude_auth` 커맨드**: `~/.claude/.credentials.json` 존재/mtime 확인. 키를 우리가 받지 않음(안전 원칙).
+  - **재로그인 도우미 모달**: 3단계(터미널 열기 → /login 안내 → 인증 확인 후 새로고침). 토스트 액션 `[재로그인 도우미]` 클릭 → 모달. 단축어 + ko/en/ja 전체 번역.
+  - **토스트 액션 버튼**: `showToast(msg, kind, ms, {action: {label, onClick}})` 시그니처 확장. 액션 클릭 시 토스트 닫히고 콜백 실행.
 - **인증 친화 진단 + 사용자 풍선 + 구독 모드 비용 숨김(v0.17.0)**:
   - **401 인증 친화 안내**: claude 출력에서 `401 Invalid authentication credentials` 패턴 감지 → UI 토스트(`🔐 Claude 인증이 만료되었어요. 터미널에서 \`claude /login\` 후 ClaudeCrew를 다시 시작해주세요.`) + output에 안내 라인. 백엔드 종료 진단도 `saw_401` 분기 추가 — 출력 끝에 친화 가이드.
   - **사용자 메시지 우측 풍선**: pretty 모드에서 `💬 사용자: ...`를 우측 정렬 + 그라데이션 풍선(코랄→브론즈) + 🙋 아바타. classifyLine 정규식 `^\s*💬` — 백엔드가 `\n` prefix 붙여 보내도 매칭.

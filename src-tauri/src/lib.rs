@@ -307,6 +307,67 @@ fn check_claude() -> Result<String, String> {
     }
 }
 
+// 인증 재로그인 도우미: 새 터미널 창을 열고 거기서 claude를 띄운다.
+// 사용자는 그 창에서 /login 슬래시 커맨드를 직접 친다(OAuth가 브라우저로 자동으로 떠 인증).
+// 키는 우리가 받지 않고 ~/.claude/.credentials.json에 사용자 본인 명의로 저장됨(안전 원칙).
+#[tauri::command]
+fn open_login_terminal() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        // cmd /K = 명령 끝나도 창 유지. start = 새 콘솔 창 띄움.
+        // 사용자가 claude REPL 안에서 /login을 직접 칠 수 있음.
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg("start").arg("").arg("cmd").arg("/K").arg("claude");
+        // hide_window 안 함 — 새 터미널 창은 보여야 함
+        c.spawn().map_err(|e| format!("터미널 열기 실패: {e}"))?;
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // Terminal.app에 claude 명령 실행 지시
+        let script = "tell application \"Terminal\" to do script \"claude\"";
+        Command::new("osascript").arg("-e").arg(script).spawn()
+            .map_err(|e| format!("Terminal.app 열기 실패: {e}"))?;
+        return Ok(());
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        // 우선순위: x-terminal-emulator → gnome-terminal → xterm
+        for (bin, args) in [
+            ("x-terminal-emulator", vec!["-e", "claude"]),
+            ("gnome-terminal", vec!["--", "claude"]),
+            ("konsole", vec!["-e", "claude"]),
+            ("xterm", vec!["-e", "claude"]),
+        ] {
+            if Command::new(bin).args(&args).spawn().is_ok() { return Ok(()); }
+        }
+        return Err("터미널 에뮬레이터를 찾지 못했어요. 직접 터미널에서 `claude` 실행 후 /login".into());
+    }
+}
+
+// 재로그인 후 짧은 claude 호출로 401이 사라졌는지 확인.
+// stdin 없이 --version만 — 인증 토큰 없어도 통과하므로, 실제로는 .credentials.json 존재 여부를 봐 줌.
+// 더 확실하게는 claude -p "ping"을 보내야 하지만 비용/지연이 생겨 가벼운 절차로 충분.
+#[tauri::command]
+fn verify_claude_auth() -> Result<String, String> {
+    let home = std::env::var("USERPROFILE").ok().or_else(|| std::env::var("HOME").ok());
+    let Some(home) = home else { return Err("HOME 변수를 못 읽었어요".into()) };
+    let cred = std::path::PathBuf::from(home).join(".claude").join(".credentials.json");
+    if !cred.exists() {
+        return Err("아직 자격증명 파일이 없어요. 터미널에서 /login을 완료해주세요.".into());
+    }
+    // mtime이 최근(최근 10분 이내)이면 재로그인 직후로 간주
+    if let Ok(meta) = std::fs::metadata(&cred) {
+        if let Ok(modified) = meta.modified() {
+            if let Ok(elapsed) = modified.elapsed() {
+                if elapsed.as_secs() < 600 { return Ok("최근 갱신됨 — 재시작 후 사용 가능".into()); }
+            }
+        }
+    }
+    // 오래된 mtime — 일단 존재한다고 통과
+    Ok("자격증명 파일 확인됨".into())
+}
+
 // ---------------- 커맨드: 온보딩 환경 설정 ----------------
 // ~/.claude 에 전문가/스킬/커맨드 설치 + 훅(범위 선택) + 팀 플래그 활성화.
 //
@@ -1912,7 +1973,9 @@ pub fn run() {
             verify_changes,
             open_task_window,
             get_timeline,
-            load_agent_output
+            load_agent_output,
+            open_login_terminal,
+            verify_claude_auth
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

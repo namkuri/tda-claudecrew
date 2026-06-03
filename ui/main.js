@@ -236,9 +236,18 @@ const I18N = {
     diffSuffix: " — 바뀐 점", diffLoading: "불러오는 중…", diffNone: "바뀐 점이 없어요.",
     diffSummary: "이번에 <b>파일 {0}개</b>가 바뀌어요. <span class='diff-add'>+{1}</span> <span class='diff-del'>-{2}</span> · 파일을 클릭하면 자세히 볼 수 있어요.",
     capped: "⚠ 비용 상한 ${0} 도달(현재 ${1}) — 진행 중인 작업을 멈췄어요. 계속하려면 위에서 상한을 올리세요.",
-    authExpired: "🔐 Claude 인증이 만료되었어요. 터미널에서 `claude /login` 후 ClaudeCrew를 다시 시작해주세요.",
-    authExpiredLine: "ℹ 안내: 비밀번호 변경 등으로 토큰이 무효화되었습니다. ① 터미널에서 `claude` 실행 → /login ② 본 앱 종료 후 재실행",
+    authExpired: "🔐 Claude 인증이 만료되었어요. 재로그인 도우미를 열어볼게요.",
+    authExpiredLine: "ℹ 안내: 비밀번호 변경 등으로 토큰이 무효화되었습니다. 우측 상단 토스트의 [재로그인 도우미]를 클릭해 단계별로 진행해주세요.",
     todayTokens: "오늘 토큰", subTokenHint: "구독 플랜이라 별도 청구는 없어요. 누적 토큰만 참고용으로 표시해요.",
+    reloginBtn: "재로그인 도우미", reloginTitle: "🔐 Claude 재로그인 도우미",
+    reloginStep1: "1단계 · 새 터미널 창 열기", reloginStep1Hint: "버튼을 누르면 새 터미널에 Claude Code REPL이 뜹니다.",
+    reloginStep1Btn: "▶ 터미널 열기",
+    reloginStep2: "2단계 · 터미널에서 /login 입력", reloginStep2Hint: "그 창에 정확히 <code>/login</code> 을 치고 Enter. 브라우저가 자동으로 열리고 로그인 페이지가 떠요. 인증이 끝나면 터미널에 'Logged in' 메시지가 보입니다.",
+    reloginStep3: "3단계 · 본 앱 재시작", reloginStep3Hint: "인증 토큰은 사용 중인 프로세스에는 자동 반영되지 않을 수 있어요. 가장 확실한 건 ClaudeCrew를 완전히 종료하고 다시 켜는 거예요.",
+    reloginStep3Btn: "🔄 인증 확인 후 새로고침",
+    reloginClose: "닫기",
+    reloginVerifyOk: "✓ 자격증명 파일을 확인했어요. 새로고침합니다…",
+    reloginVerifyFail: "아직 자격증명 파일을 못 찾았어요. 2단계 /login을 마쳐주세요.",
     demoBadge: "🖥️ 데모 모드 — 화면 미리보기예요. 실제 작업(파일 수정·저장)은 데스크톱 앱에서 동작해요.",
     demoCheck: "데모 모드 (브라우저 미리보기)", demoSetup: "데모: 실제 설치는 데스크톱 앱에서 진행됩니다.", demoCommit: "데모: 실제 저장(commit)은 데스크톱 앱에서 됩니다.",
     rfNeedName: "이름과 부탁 문구를 적어주세요.", rfSaved: "레시피를 저장했어요.", rfDeleted: "레시피를 삭제했어요.",
@@ -331,9 +340,18 @@ const I18N = {
     diffSuffix: " — Changes", diffLoading: "Loading…", diffNone: "No changes.",
     diffSummary: "<b>{0} file(s)</b> changed. <span class='diff-add'>+{1}</span> <span class='diff-del'>-{2}</span> · Click a file to see details.",
     capped: "⚠ Cost cap ${0} reached (now ${1}) — running work was stopped. Raise the cap above to continue.",
-    authExpired: "🔐 Claude auth expired. Run `claude /login` in a terminal, then restart ClaudeCrew.",
-    authExpiredLine: "ℹ Hint: token likely invalidated (password change?). ① Run `claude` → /login ② Quit and relaunch this app.",
+    authExpired: "🔐 Claude auth expired. Opening the re-login helper.",
+    authExpiredLine: "ℹ Hint: token likely invalidated (password change?). Click [Re-login helper] in the toast for step-by-step guidance.",
     todayTokens: "Tokens today", subTokenHint: "You're on a subscription — no per-token billing. Token total is informational.",
+    reloginBtn: "Re-login helper", reloginTitle: "🔐 Claude re-login helper",
+    reloginStep1: "Step 1 · Open a new terminal", reloginStep1Hint: "Click to launch a new terminal with the Claude Code REPL running.",
+    reloginStep1Btn: "▶ Open terminal",
+    reloginStep2: "Step 2 · Type /login in that terminal", reloginStep2Hint: "In the new window type exactly <code>/login</code> and press Enter. A browser opens for OAuth. After success the terminal shows 'Logged in'.",
+    reloginStep3: "Step 3 · Restart ClaudeCrew", reloginStep3Hint: "The running process may keep a stale token. Quitting and reopening ClaudeCrew is the surest fix.",
+    reloginStep3Btn: "🔄 Verify and reload",
+    reloginClose: "Close",
+    reloginVerifyOk: "✓ Credentials file found. Reloading…",
+    reloginVerifyFail: "Credentials file not yet present. Please complete /login first.",
     demoBadge: "🖥️ Demo mode — this is a UI preview. Real work (editing/saving files) runs in the desktop app.",
     demoCheck: "Demo mode (browser preview)", demoSetup: "Demo: real install happens in the desktop app.", demoCommit: "Demo: real saving (commit) happens in the desktop app.",
     rfNeedName: "Please enter a name and request text.", rfSaved: "Recipe saved.", rfDeleted: "Recipe deleted.",
@@ -405,9 +423,18 @@ I18N.ja = {
   newTask: "＋ 新規タスク", newTabLabel: "＋ 新規タスク",
   fltAll: "全て", fltRunning: "進行", fltDone: "完了", fltError: "エラー",
   grpActive: "▶ 進行中", grpDone: "✓ 完了", grpIssue: "⚠ 要確認",
-  authExpired: "🔐 Claude 認証が切れています。ターミナルで `claude /login` 後、ClaudeCrew を再起動してください。",
-  authExpiredLine: "ℹ パスワード変更等でトークンが無効化された可能性。① `claude` → /login ② 本アプリ終了して再起動",
+  authExpired: "🔐 Claude 認証が切れています。再ログインヘルパーを開きます。",
+  authExpiredLine: "ℹ トークンが無効化されました。トーストの[再ログインヘルパー]から手順を進めてください。",
   todayTokens: "本日トークン", subTokenHint: "サブスクなので個別課金なし。累計トークンは参考表示のみ。",
+  reloginBtn: "再ログインヘルパー", reloginTitle: "🔐 Claude 再ログインヘルパー",
+  reloginStep1: "Step 1 · 新しいターミナル", reloginStep1Hint: "ボタンで新規ターミナルが開き Claude Code REPL が起動します。",
+  reloginStep1Btn: "▶ ターミナルを開く",
+  reloginStep2: "Step 2 · /login 入力", reloginStep2Hint: "そのウィンドウで <code>/login</code> を入力。ブラウザが OAuth ページに遷移します。",
+  reloginStep3: "Step 3 · ClaudeCrew 再起動", reloginStep3Hint: "実行中プロセスには古いトークンが残ることがあります。終了して再起動が最も確実。",
+  reloginStep3Btn: "🔄 確認して再読込",
+  reloginClose: "閉じる",
+  reloginVerifyOk: "✓ 認証ファイルを確認しました。再読込します…",
+  reloginVerifyFail: "認証ファイルがまだありません。/login を完了してください。",
   minimapTab: "ミニマップ", verifyTab: "検証",
   tlPlay: "再生/一時停止", tlBack: "最初へ", tlLive: "ライブ",
   popout: "🪟 別ウィンドウ",
@@ -510,6 +537,8 @@ function makeDemoApi(){
         window.open(location.pathname + "?detached=1&taskId=" + args.id + p, wn, "width=900,height=620");
         return Promise.resolve();
       }
+      case "open_login_terminal": console.log("[demo] open_login_terminal"); return Promise.resolve();
+      case "verify_claude_auth":  return Promise.resolve("demo: 자격증명 확인됨");
       case "verify_changes":    return Promise.resolve({ ran:true, success:true, note:"감지됨: Node", steps:[
         { name:"npm", command:"npm run build", success:true, stdout:"built", stderr:"" },
         { name:"npm", command:"npm test", success:true, stdout:"3 passed", stderr:"" },
@@ -892,7 +921,8 @@ function showBoot(msg){
 }
 function hideBoot(){ const el = $("#bootToast"); if (el) el.classList.add("hidden"); }
 // 일반 토스트 — info|warn|err. ms 후 자동 숨김. native alert 대체용
-function showToast(msg, kind, ms){
+// opts.action = {label, onClick} — 클릭 시 토스트 닫히고 콜백 실행
+function showToast(msg, kind, ms, opts){
   let stack = $("#toastStack");
   if (!stack){
     stack = document.createElement("div"); stack.id = "toastStack"; stack.className = "toast-stack";
@@ -900,11 +930,69 @@ function showToast(msg, kind, ms){
   }
   const el = document.createElement("div");
   el.className = "cc-toast " + (kind || "info");
-  el.innerHTML = `<span class="cc-toast-msg">${esc(msg)}</span><button class="cc-toast-x" aria-label="close">×</button>`;
+  const actionHtml = (opts && opts.action)
+    ? `<button class="cc-toast-act">${esc(opts.action.label)}</button>` : "";
+  el.innerHTML = `<span class="cc-toast-msg">${esc(msg)}</span>${actionHtml}<button class="cc-toast-x" aria-label="close">×</button>`;
   stack.appendChild(el);
   const close = () => { el.classList.add("out"); setTimeout(()=>el.remove(), 200); };
   el.querySelector(".cc-toast-x").addEventListener("click", close);
+  if (opts && opts.action){
+    el.querySelector(".cc-toast-act").addEventListener("click", () => { close(); try { opts.action.onClick(); } catch(_){} });
+  }
   setTimeout(close, Math.max(2000, ms || 5000));
+}
+
+// 재로그인 도우미 모달 — 3단계 가이드
+function showLoginHelper(){
+  if ($("#loginHelper")) return; // 중복 방지
+  const modal = document.createElement("div");
+  modal.id = "loginHelper"; modal.className = "cc-modal";
+  modal.innerHTML = `
+    <div class="cc-modal-card">
+      <div class="cc-modal-head">
+        <h3>${esc(t("reloginTitle"))}</h3>
+        <button class="cc-modal-x" aria-label="close">×</button>
+      </div>
+      <div class="cc-modal-body">
+        <div class="login-step">
+          <div class="login-step-h">${esc(t("reloginStep1"))}</div>
+          <p class="login-step-p">${esc(t("reloginStep1Hint"))}</p>
+          <button class="btn primary" id="lhStep1">${esc(t("reloginStep1Btn"))}</button>
+        </div>
+        <div class="login-step">
+          <div class="login-step-h">${esc(t("reloginStep2"))}</div>
+          <p class="login-step-p">${t("reloginStep2Hint")}</p>
+        </div>
+        <div class="login-step">
+          <div class="login-step-h">${esc(t("reloginStep3"))}</div>
+          <p class="login-step-p">${esc(t("reloginStep3Hint"))}</p>
+          <button class="btn primary" id="lhStep3">${esc(t("reloginStep3Btn"))}</button>
+          <span class="login-step-msg" id="lhMsg"></span>
+        </div>
+      </div>
+      <div class="cc-modal-foot">
+        <button class="btn" id="lhClose">${esc(t("reloginClose"))}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  modal.querySelector(".cc-modal-x").addEventListener("click", close);
+  modal.querySelector("#lhClose").addEventListener("click", close);
+  modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+  modal.querySelector("#lhStep1").addEventListener("click", async () => {
+    try { await invoke("open_login_terminal"); }
+    catch (e) { $("#lhMsg").textContent = String(e); $("#lhMsg").className = "login-step-msg err"; }
+  });
+  modal.querySelector("#lhStep3").addEventListener("click", async () => {
+    try {
+      await invoke("verify_claude_auth");
+      $("#lhMsg").textContent = t("reloginVerifyOk"); $("#lhMsg").className = "login-step-msg ok";
+      setTimeout(() => location.reload(), 1000);
+    } catch (e) {
+      $("#lhMsg").textContent = t("reloginVerifyFail") + " (" + String(e) + ")";
+      $("#lhMsg").className = "login-step-msg err";
+    }
+  });
 }
 
 async function enterApp(){
@@ -1919,10 +2007,12 @@ listen("agent_output", (ev) => {
   const { id, text } = ev.payload; const a = state.get(id); if (!a) return;
   const wasEmpty = !(a.output && a.output.length);
   (a.output = a.output || []).push(text);
-  // 401 인증 실패 감지 — 한 번만 토스트 + 안내
+  // 401 인증 실패 감지 — 한 번만 토스트 + 안내 + 도우미 열기 액션
   if (!a._authWarned && /401\s*Invalid authentication credentials|API Error:\s*401/i.test(text)) {
     a._authWarned = true;
-    showToast(t("authExpired"), "warn", 8000);
+    showToast(t("authExpired"), "warn", 15000, {
+      action: { label: t("reloginBtn"), onClick: showLoginHelper }
+    });
     (a.output = a.output).push(t("authExpiredLine"));
   }
   if (id !== selectedId) return;                 // 안 보이는 탭은 상태만 누적

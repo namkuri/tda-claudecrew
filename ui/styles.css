@@ -184,7 +184,26 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .cc-toast .cc-toast-msg{flex:1}
 .cc-toast .cc-toast-x{background:transparent;border:0;color:var(--dim);cursor:pointer;font-size:16px;line-height:1;padding:0 2px}
 .cc-toast .cc-toast-x:hover{color:var(--ink)}
+.cc-toast .cc-toast-act{background:var(--claude);border:0;color:#fff;cursor:pointer;font-size:11.5px;padding:5px 10px;border-radius:6px;font-weight:600;white-space:nowrap}
+.cc-toast .cc-toast-act:hover{filter:brightness(1.08)}
 @keyframes toastIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+/* 모달 (재로그인 도우미 등) */
+.cc-modal{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);animation:fadeIn .15s ease-out}
+.cc-modal-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;width:min(520px,92vw);max-height:88vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.55);display:flex;flex-direction:column}
+.cc-modal-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--line)}
+.cc-modal-head h3{margin:0;font-size:14px;color:var(--ink)}
+.cc-modal-x{background:transparent;border:0;color:var(--dim);cursor:pointer;font-size:18px;line-height:1;padding:2px 6px}
+.cc-modal-x:hover{color:var(--ink)}
+.cc-modal-body{padding:18px;display:flex;flex-direction:column;gap:18px}
+.cc-modal-foot{padding:12px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+.login-step{border-left:3px solid var(--claude);padding:8px 12px;background:var(--panel2);border-radius:0 6px 6px 0}
+.login-step-h{font-weight:700;font-size:12.5px;color:var(--ink);margin-bottom:4px}
+.login-step-p{margin:4px 0 8px;font-size:12px;color:var(--dim);line-height:1.5}
+.login-step-p code{background:rgba(0,0,0,.25);padding:1px 6px;border-radius:4px;color:var(--claude);font-family:var(--mono);font-size:11.5px}
+.login-step-msg{display:inline-block;margin-left:10px;font-size:11.5px}
+.login-step-msg.ok{color:var(--ok)}
+.login-step-msg.err{color:var(--err)}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
 
 /* 좌: 워크스페이스 사이드바 */
 .sidebar{display:flex;flex-direction:column;border-right:1px solid var(--line);background:var(--panel);min-height:0}
