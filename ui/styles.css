@@ -211,6 +211,23 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .login-step-msg.err{color:var(--err)}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 /* xterm 마운트 영역 */
+/* 미니맵 파일 미리보기 */
+.mm-svg-node[data-mm-file]{cursor:pointer}
+.mm-svg-node[data-mm-file]:hover rect{fill:rgba(232,148,103,.10)}
+.mm-preview{margin:8px 6px 4px;border:1px solid var(--line);border-radius:8px;background:#06090c;overflow:hidden;box-shadow:0 6px 22px rgba(0,0,0,.45)}
+.mm-prev-head{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--line);font-size:11.5px;background:var(--panel2)}
+.mm-prev-head b{color:var(--claude);font-family:var(--mono);font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mm-prev-meta{color:var(--faint);font-size:10.5px}
+.mm-prev-x{background:transparent;border:0;color:var(--dim);cursor:pointer;font-size:14px;padding:0 2px}
+.mm-prev-x:hover{color:var(--ink)}
+.mm-prev-loading{color:var(--faint);font-size:10.5px;font-style:italic}
+.mm-prev-body{margin:0;padding:8px 0;font-family:var(--mono);font-size:11px;line-height:1.45;max-height:380px;overflow:auto;white-space:pre}
+.mm-prev-ln{display:flex;gap:10px;padding:0 8px}
+.mm-prev-ln .ln-no{color:rgba(255,255,255,0.25);text-align:right;min-width:32px;user-select:none;font-size:10.5px;flex:0 0 auto}
+.mm-prev-ln code{flex:1;color:#cfd6dd;white-space:pre}
+.mm-prev-ln:hover{background:rgba(255,255,255,.03)}
+.mm-prev-more{padding:6px 10px;color:var(--faint);font-size:10.5px;font-style:italic;border-top:1px solid var(--line)}
+.mm-prev-err{padding:14px;color:var(--err);font-size:11.5px}
 .pty-mount{height:100%;min-height:300px;background:#0b0e11;border-radius:6px;overflow:hidden;padding:6px}
 .pty-mount .xterm{height:100%;padding:4px}
 .pty-mount .xterm-viewport{background:transparent!important}
@@ -266,6 +283,33 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 .ws-branch{grid-column:2;grid-row:2;font-family:var(--mono);font-size:11px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ws-stat{grid-column:3;grid-row:1;font-family:var(--mono);font-size:11px;display:flex;gap:5px;justify-content:flex-end}
 .ws-id{grid-column:3;grid-row:2;font-family:var(--mono);font-size:10px;color:var(--faint);text-align:right}
+.ws-del{position:absolute;right:6px;top:6px;background:transparent;border:0;color:var(--faint);cursor:pointer;font-size:12px;padding:2px 5px;border-radius:4px;opacity:0;transition:opacity .15s,color .15s,background .15s}
+.ws-item{position:relative}
+.ws-item:hover .ws-del{opacity:1}
+.ws-del:hover{color:#fff;background:var(--err)}
+/* 우클릭 컨텍스트 메뉴 */
+.ws-ctx{position:fixed;z-index:90;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(0,0,0,.55);padding:4px;min-width:160px;font-size:12.5px}
+.ws-ctx button{display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:0;padding:7px 12px;text-align:left;color:var(--ink);cursor:pointer;border-radius:6px;font-size:12.5px}
+.ws-ctx button:hover{background:var(--panel2);color:var(--claude)}
+.ws-ctx button.danger:hover{background:rgba(255,107,107,.15);color:var(--err)}
+.ws-ctx-sep{height:1px;background:var(--line);margin:3px 4px}
+/* 📊 통합 모니터링 보드 */
+.mb-card-modal{width:min(900px, 95vw);max-height:90vh}
+.mb-body{padding:14px 18px}
+.mb-summary{font-size:11.5px;color:var(--dim);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.mb-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));gap:12px}
+.mb-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;transition:border-color .15s,transform .15s}
+.mb-card:hover{border-color:var(--claude);transform:translateY(-1px)}
+.mb-card.running,.mb-card.creating,.mb-card.warming{border-left:3px solid var(--run)}
+.mb-card.done{border-left:3px solid var(--done)}
+.mb-card.error,.mb-card.stopped{border-left:3px solid var(--err)}
+.mb-head{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.mb-head b{flex:1;font-size:12.5px;color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mb-id{font-family:var(--mono);font-size:10px;color:var(--faint)}
+.mb-meta{display:flex;gap:10px;font-size:10.5px;color:var(--dim);margin-bottom:6px}
+.mb-subs{font-size:11px;color:var(--claude);margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.mb-sub-chip{display:inline-block;padding:1px 6px;border-radius:999px;background:rgba(232,148,103,.10);font-size:10px;font-weight:500}
+.mb-last{margin-top:6px;font-size:10.5px;font-family:var(--mono);color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .side-foot{padding:12px 16px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center}
 .btn.go.sm{padding:8px 12px;font-size:12px;flex:1}
 
@@ -554,8 +598,14 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 @keyframes nodepulse{0%,100%{filter:drop-shadow(0 0 4px var(--claude))}50%{filter:drop-shadow(0 0 12px var(--claude))}}
 .mm-svg .mm-node-name{fill:var(--ink);font-family:var(--mono)}
 .mm-svg-node.dir .mm-node-name{fill:var(--accent);font-weight:700}
+/* mm-agent 내부 텍스트 — 코랄 원 위(이모지)는 어두운 색, 옆 라벨은 밝은 색 + 외곽 그림자 */
 .mm-agent text{fill:#1a1410;font-weight:700;pointer-events:none}
-.mm-agent circle{filter:drop-shadow(0 0 6px var(--claude));animation:nodepulse 1.5s ease-in-out infinite}
+.mm-agent .mm-agent-label{fill:#f5e8dc;paint-order:stroke;stroke:rgba(0,0,0,0.55);stroke-width:3px;stroke-linejoin:round;font-weight:600}
+.mm-agent.live circle{filter:drop-shadow(0 0 6px var(--claude));animation:nodepulse 1.5s ease-in-out infinite}
+.mm-agent.rest circle{filter:drop-shadow(0 0 4px rgba(232,148,103,.35));opacity:.85}
+.mm-agent.err circle{fill:var(--err);filter:drop-shadow(0 0 5px var(--err))}
+.mm-agent.sub circle{filter:none}
+.mm-agent.sub.live circle{animation:nodepulse 1.8s ease-in-out infinite}
 @media(max-width:1100px){ .mm-grid{grid-template-columns:1fr;grid-template-rows:1fr 1fr} .mm-tree{border-right:none;border-bottom:1px solid var(--line)} }
 .follow-up .btn.go{padding:9px 18px;font-size:13px;flex:none;align-self:stretch}
 

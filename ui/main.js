@@ -117,12 +117,35 @@ function renderMinimap(a, opts){
     const last = lastAct.target.split(/[\\/]/).filter(Boolean).pop();
     return layout.nodes.findIndex(n => n.isFile && n.name === last);
   })();
-  // 에이전트 배지 — 활동 path 따라 이동(SMIL animateTransform).
-  // 마지막 N개의 활동 좌표를 시퀀스화하여 자연스러운 흐름 애니메이션.
+  // 에이전트 배지(들) — 작업 status에 따라 동작 분기:
+  //   running/creating/warming → path 따라 이동(SMIL animateTransform)
+  //   done/error/stopped       → 마지막 활동 노드에 고정 + "완료" 라벨
+  // 또한 호출된 서브에이전트마다 개별 배지를 띄움(여러 명이 보임).
+  const isLive = a.status === "running" || a.status === "creating" || a.status === "warming";
+  const doneLabel = a.status === "done" ? (lang === "en" ? "done" : (lang === "ja" ? "完了" : "완료"))
+                  : a.status === "error" ? (lang === "en" ? "error" : (lang === "ja" ? "失敗" : "실패"))
+                  : a.status === "stopped" ? (lang === "en" ? "stopped" : (lang === "ja" ? "停止" : "정지"))
+                  : "";
+  // 호출된 에이전트 목록 — teammates(서브에이전트들) + 부모 role.
+  const activeAgents = (() => {
+    const list = [];
+    const tm = a.teammates || {};
+    const tmKeys = Object.keys(tm);
+    // 서브에이전트 — 각자가 마지막에 손댄 파일(있으면)로 위치
+    for (const name of tmKeys) {
+      const m = mate(tm, name);
+      const status = m.status || "working";
+      list.push({ role: name, status });
+    }
+    // 부모(오케스트레이터/팀장) — 서브가 0이면 단독, 있으면 함께 표시
+    list.push({ role: a.role || "orchestrator", status: a.status, primary: true });
+    return list;
+  })();
+  // 각 에이전트의 위치를 결정 — primary는 path를 따라가고, 서브들은 자신이 손댄 마지막 파일에 머무름.
+  // 서브에이전트는 act 안에 직접 정보가 없어 결과적으로 모두 lastFileIdx 노드 근처에 분산 배치.
   const agentBadge = (() => {
     if (lastFileIdx < 0) return "";
-    const b = badgeOf(a.role || "orchestrator");
-    // 최근 활동들의 노드 좌표 시퀀스 — 파일이 아닌 활동은 부모 디렉터리 노드로 폴백
+    // primary 에이전트의 path 시퀀스
     const seq = (() => {
       const recentActs = acts.slice(-Math.min(12, acts.length));
       const coords = [];
@@ -134,27 +157,65 @@ function renderMinimap(a, opts){
         if (!node && layout.nodes.length) node = layout.nodes[lastFileIdx >= 0 ? lastFileIdx : 0];
         if (node) coords.push(`${node.x + 200},${node.y - 4}`);
       }
-      // 단일 좌표면 시작·끝 동일로 두 번 — SMIL이 values 1개면 멈춤
       if (coords.length === 1) coords.push(coords[0]);
       return coords;
     })();
     const pathStr = seq.join(";");
-    const dur = Math.max(2.5, seq.length * 0.7); // 활동 하나당 ≈0.7s
-    return `<g class="mm-agent">
-      <circle r="13" cx="0" cy="13" fill="var(--claude)" />
-      <text x="0" y="18" text-anchor="middle" font-size="13">${b.icon}</text>
-      <text x="-18" y="9" text-anchor="end" font-size="9" fill="var(--ink)">${esc(b[lang === "en" ? "en" : "ko"])}</text>
-      <animateTransform attributeName="transform" type="translate" values="${pathStr}" keyTimes="${seq.map((_,i)=>(i/(seq.length-1)).toFixed(3)).join(";")}" dur="${dur}s" repeatCount="indefinite" calcMode="spline" keySplines="${seq.slice(1).map(()=>"0.4 0 0.6 1").join(";")}" />
-    </g>`;
+    const dur = Math.max(2.5, seq.length * 0.7);
+    const lastN = layout.nodes[lastFileIdx];
+    const finalCoord = `${lastN.x + 200},${lastN.y - 4}`;
+
+    // primary 배지 — running이면 path 애니, 끝났으면 마지막 위치에 정지
+    const pBadge = (() => {
+      const a0 = activeAgents.find(x => x.primary) || { role: "orchestrator", status: a.status };
+      const b = badgeOf(a0.role);
+      const labelText = doneLabel ? `${b[lang === "en" ? "en" : "ko"]} · ${doneLabel}` : b[lang === "en" ? "en" : "ko"];
+      const anim = isLive && seq.length >= 2 ? `<animateTransform attributeName="transform" type="translate" values="${pathStr}" keyTimes="${seq.map((_,i)=>(i/(seq.length-1)).toFixed(3)).join(";")}" dur="${dur}s" repeatCount="indefinite" calcMode="spline" keySplines="${seq.slice(1).map(()=>"0.4 0 0.6 1").join(";")}" />` : "";
+      const staticTransform = isLive ? "" : ` transform="translate(${finalCoord})"`;
+      const stateCls = isLive ? "live" : (a.status === "error" ? "err" : "rest");
+      return `<g class="mm-agent ${stateCls}"${staticTransform}>
+        <circle r="13" cx="0" cy="13" fill="var(--claude)" />
+        <text x="0" y="18" text-anchor="middle" font-size="13">${b.icon}</text>
+        <text x="-18" y="9" text-anchor="end" font-size="9" class="mm-agent-label">${esc(labelText)}</text>
+        ${anim}
+      </g>`;
+    })();
+
+    // 서브에이전트들 — 마지막 활동 노드 주변에 분산 배치(작은 원, 작업 종료 후 그대로 정지)
+    const subBadges = activeAgents.filter(x => !x.primary).map((x, i) => {
+      const b = badgeOf(x.role);
+      const dx = 220 + (i % 3) * 14;
+      const dy = lastN.y + 22 + Math.floor(i / 3) * 18;
+      const stateCls = x.status === "working" ? "live" : (x.status === "error" ? "err" : "rest");
+      return `<g class="mm-agent sub ${stateCls}" transform="translate(${dx}, ${dy})">
+        <circle r="8" cx="0" cy="0" fill="var(--accent)" opacity="0.85" />
+        <text x="0" y="3" text-anchor="middle" font-size="10">${b.icon}</text>
+      </g>`;
+    }).join("");
+    return pBadge + subBadges;
   })();
 
   const edgesSvg = layout.edges.map(e => `<path d="M${e.x1} ${e.y1} C${e.x1} ${(e.y1 + e.y2)/2}, ${e.x2 - 12} ${e.y2}, ${e.x2} ${e.y2}" class="mm-edge"/>`).join("");
+  // 노드별 상대경로 — 마지막 활동의 target에서 추출(파일만, 폴더는 클릭 무시)
+  const nodeRel = (n) => {
+    if (!n.isFile) return "";
+    // n.acts[i].target은 절대 또는 상대 — worktree 기준 상대로 잘라 보낸다.
+    const wt = (a.worktree || "").replace(/\\/g, "/");
+    for (let i = n.acts.length - 1; i >= 0; i--){
+      let p = (n.acts[i].target || "").replace(/\\/g, "/");
+      if (!p) continue;
+      if (wt && p.startsWith(wt)) p = p.slice(wt.length).replace(/^\/+/, "");
+      if (p.endsWith(n.name)) return p;
+    }
+    return n.name;
+  };
   const nodesSvg = layout.nodes.map((n, i) => {
     const cls = n.isFile ? "file" : "dir";
     const isLast = i === lastFileIdx;
     const icon = n.lastKind ? activityIcon(n.lastKind) : (n.isFile ? "📄" : "📁");
     const countText = n.count > 1 ? `<text x="190" y="${n.y + 13}" font-size="10" fill="var(--faint)" text-anchor="end">×${n.count}</text>` : "";
-    return `<g class="mm-svg-node ${cls} ${isLast ? "last" : ""}">
+    const relAttr = n.isFile ? ` data-mm-file="${esc(nodeRel(n))}"` : "";
+    return `<g class="mm-svg-node ${cls} ${isLast ? "last" : ""}"${relAttr}>
       <rect x="${n.x}" y="${n.y}" width="200" height="18" rx="4" />
       <text x="${n.x + 4}" y="${n.y + 13}" font-size="12">${icon}</text>
       <text x="${n.x + 22}" y="${n.y + 13}" font-size="11.5" class="mm-node-name">${esc(n.name)}</text>
@@ -184,6 +245,7 @@ function renderMinimap(a, opts){
     </div>
     <div class="mm-log">
       <div class="mm-head">${esc(t("minimapLog"))} <span class="mm-count">${acts.length}</span></div>
+      <div class="mm-preview" id="mmPreview-${a.id}" hidden></div>
       ${logHtml}
     </div>
   </div>`;
@@ -272,6 +334,13 @@ const I18N = {
     sub_stats_hint: "결과 텍스트에서 추정한 활동 — 서브에이전트 내부 도구 호출은 SDK가 노출하지 않습니다.",
     termTab: "터미널", termTabTitle: "claude REPL을 앱 안에서 직접 — /login 같은 슬래시 커맨드도 OK",
     folderChanged: "📂 폴더 변경 완료",
+    wsDelTip: "이 작업 삭제(워크트리/세션 정리)", delConfirm: "이 작업을 삭제할까요? 워크트리·세션이 모두 정리됩니다.",
+    ctxSelect: "열기", ctxPopout: "별도 창", ctxStop: "중지", ctxDup: "프롬프트 복제",
+    cancel: "취소", confirm: "확인",
+    parallelMode: "🚀 병렬 분할", parallelTitle: "첫 어시스턴트 턴부터 3~7개 Task를 동시에 호출",
+    boardBtn: "📊 보드", boardTitle: "모든 작업을 한 화면에서 — 통합 모니터링 보드",
+    boardTitle2: "📊 통합 모니터링 보드", boardEmpty: "아직 진행 중인 작업이 없어요.",
+    boardSummary: "{0}개 작업 · 진행 {1} · 완료 {2} · 점검 {3}",
     demoBadge: "🖥️ 데모 모드 — 화면 미리보기예요. 실제 작업(파일 수정·저장)은 데스크톱 앱에서 동작해요.",
     demoCheck: "데모 모드 (브라우저 미리보기)", demoSetup: "데모: 실제 설치는 데스크톱 앱에서 진행됩니다.", demoCommit: "데모: 실제 저장(commit)은 데스크톱 앱에서 됩니다.",
     rfNeedName: "이름과 부탁 문구를 적어주세요.", rfSaved: "레시피를 저장했어요.", rfDeleted: "레시피를 삭제했어요.",
@@ -380,6 +449,13 @@ const I18N = {
     sub_stats_hint: "Estimated from the result text — actual sub-agent tool calls are not exposed by the SDK.",
     termTab: "Terminal", termTabTitle: "Embedded claude REPL — type /login or any slash command",
     folderChanged: "📂 Folder changed",
+    wsDelTip: "Delete this task (cleans worktree/session)", delConfirm: "Delete this task? Its worktree and session will be cleaned.",
+    ctxSelect: "Open", ctxPopout: "Pop out", ctxStop: "Stop", ctxDup: "Duplicate prompt",
+    cancel: "Cancel", confirm: "Confirm",
+    parallelMode: "🚀 Parallel", parallelTitle: "Force 3-7 concurrent Task calls from the first turn",
+    boardBtn: "📊 Board", boardTitle: "Unified monitoring board — every task at a glance",
+    boardTitle2: "📊 Unified Monitoring Board", boardEmpty: "No tasks yet.",
+    boardSummary: "{0} tasks · {1} running · {2} done · {3} need attention",
     demoBadge: "🖥️ Demo mode — this is a UI preview. Real work (editing/saving files) runs in the desktop app.",
     demoCheck: "Demo mode (browser preview)", demoSetup: "Demo: real install happens in the desktop app.", demoCommit: "Demo: real saving (commit) happens in the desktop app.",
     rfNeedName: "Please enter a name and request text.", rfSaved: "Recipe saved.", rfDeleted: "Recipe deleted.",
@@ -467,6 +543,13 @@ I18N.ja = {
   sub_stats_hint: "結果テキストから推定 — 内部ツール呼び出しは SDK が非公開。",
   termTab: "ターミナル", termTabTitle: "claude REPL を内蔵 — /login など直接入力可",
   folderChanged: "📂 フォルダ変更完了",
+  wsDelTip: "このタスクを削除", delConfirm: "このタスクを削除しますか? worktree も整理されます。",
+  ctxSelect: "開く", ctxPopout: "別ウィンドウ", ctxStop: "停止", ctxDup: "プロンプト複製",
+  cancel: "キャンセル", confirm: "確認",
+  parallelMode: "🚀 並列分割", parallelTitle: "最初のターンから3~7個のTaskを並列実行",
+  boardBtn: "📊 ボード", boardTitle: "全タスクを一画面で — 統合監視ボード",
+  boardTitle2: "📊 統合監視ボード", boardEmpty: "進行中のタスクはまだありません。",
+  boardSummary: "{0}件 · 実行中 {1} · 完了 {2} · 確認 {3}",
   minimapTab: "ミニマップ", verifyTab: "検証",
   tlPlay: "再生/一時停止", tlBack: "最初へ", tlLive: "ライブ",
   popout: "🪟 別ウィンドウ",
@@ -582,6 +665,9 @@ function makeDemoApi(){
         return Promise.resolve();
       }
       case "pty_resize": case "pty_close": return Promise.resolve();
+      case "read_file_preview": return Promise.resolve(
+        `// ${args.rel}\n// (데모) 실제 파일 미리보기는 데스크톱 앱에서만 제공됩니다.\nfunction onLogin() {\n  const btn = document.querySelector('#login');\n  btn.addEventListener('click', submit);\n  btn.disabled = false;\n}\nfunction submit() {\n  console.log('로그인 시도');\n}\n`
+      );
       case "verify_changes":    return Promise.resolve({ ran:true, success:true, note:"감지됨: Node", steps:[
         { name:"npm", command:"npm run build", success:true, stdout:"built", stderr:"" },
         { name:"npm", command:"npm test", success:true, stdout:"3 passed", stderr:"" },
@@ -944,6 +1030,7 @@ async function changeFolderInline(){
 }
 document.getElementById("btnChangeFolder")?.addEventListener("click", changeFolderInline);
 document.getElementById("repoName")?.addEventListener("click", changeFolderInline);
+document.getElementById("btnBoard")?.addEventListener("click", showMonitorBoard);
 
 $("#btnSetup").addEventListener("click", async () => {
   $("#setupStatus").textContent = t("installing"); $("#setupStatus").className = "status";
@@ -1332,8 +1419,9 @@ $("#btnRun").addEventListener("click", async () => {
   const agent = $("#prompt").dataset.agent || null;
   const keepgoing = $("#tglKeep").checked;
   const team = $("#tglTeam").checked;
+  const parallel = $("#tglParallel")?.checked || false;
   try {
-    await invoke("create_agent", { repo: repoPath, prompt: promptText, model, permission, branch: null, agent, keepgoing, team, authmode: authMode });
+    await invoke("create_agent", { repo: repoPath, prompt: promptText, model, permission, branch: null, agent, keepgoing, team, authmode: authMode, parallel });
     $("#prompt").value = ""; delete $("#prompt").dataset.perm; delete $("#prompt").dataset.agent;
   } catch (e) { alert(t("runFail") + e); }
 });
@@ -1782,8 +1870,138 @@ function makeWsRow(a){
     `<span class="ws-name">${esc((a.prompt || a.branch || a.id).trim() || a.id)}</span>` +
     `<span class="ws-branch">${esc(a.branch || "")}</span>` +
     `<span class="ws-stat"><span class="gp-add">+${st.adds}</span><span class="gp-del">-${st.dels}</span></span>` +
-    `<span class="ws-id">#${shortId(a.id)}</span>`;
+    `<span class="ws-id">#${shortId(a.id)}</span>` +
+    `<button class="ws-del" data-act="ws-del" title="${esc(t("wsDelTip") || "이 작업 삭제")}" aria-label="delete">✕</button>`;
+  // 우클릭 → 컨텍스트 메뉴
+  row.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    showWsContextMenu(a.id, e.clientX, e.clientY);
+  });
   return row;
+}
+
+// 📊 통합 모니터링 보드 — 모든 작업을 grid 카드로
+function showMonitorBoard(){
+  document.querySelector("#monBoard")?.remove();
+  const all = [...state.values()];
+  const running = all.filter(a => ["running","creating","warming"].includes(a.status)).length;
+  const done = all.filter(a => a.status === "done").length;
+  const issue = all.filter(a => ["error","stopped"].includes(a.status)).length;
+  const cards = all.map(a => {
+    const tm = a.teammates || {};
+    const subs = Object.keys(tm);
+    const dur = a.started_at ? fmtDuration(Date.now() - a.started_at) : "";
+    const lastTool = (() => {
+      const out = a.output || [];
+      for (let i = out.length - 1; i >= 0; i--){
+        const line = out[i] || "";
+        const m = line.match(/^[🔧✏️📄📁🔍💻🧑‍💼💭]\s*[A-Za-z ]+\(([^)]+)\)/);
+        if (m) return line.slice(0, 40);
+      }
+      return "";
+    })();
+    return `<div class="mb-card ${a.status}" data-id="${esc(a.id)}">
+      <div class="mb-head">
+        <span class="ws-st ${a.status}"></span>
+        <b>${esc((a.prompt || a.branch || a.id).slice(0, 36))}</b>
+        <span class="mb-id">#${shortId(a.id)}</span>
+      </div>
+      <div class="mb-meta">
+        <span>${esc(t("status_" + a.status) || a.status)}</span>
+        ${dur ? `<span>⏱ ${dur}</span>` : ""}
+        ${a.tokens_in ? `<span>🔤 ${fmtTok((a.tokens_in||0)+(a.tokens_out||0))}</span>` : ""}
+      </div>
+      ${subs.length ? `<div class="mb-subs">🧑‍💼 ${subs.length}명 위임 · ${subs.slice(0,4).map(n => `<span class="mb-sub-chip">${esc(expertLabel(n))}</span>`).join("")}${subs.length > 4 ? ` +${subs.length-4}` : ""}</div>` : ""}
+      ${lastTool ? `<div class="mb-last" title="${esc(lastTool)}">${esc(lastTool)}</div>` : ""}
+    </div>`;
+  }).join("");
+  const modal = document.createElement("div");
+  modal.id = "monBoard"; modal.className = "cc-modal";
+  modal.innerHTML = `<div class="cc-modal-card mb-card-modal">
+    <div class="cc-modal-head">
+      <h3>${esc(t("boardTitle2"))}</h3>
+      <button class="cc-modal-x" aria-label="close">×</button>
+    </div>
+    <div class="cc-modal-body mb-body">
+      <div class="mb-summary">${t("boardSummary", all.length, running, done, issue)}</div>
+      ${all.length ? `<div class="mb-grid">${cards}</div>` : `<div class="gp-empty" style="padding:30px;text-align:center">${esc(t("boardEmpty"))}</div>`}
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  modal.querySelector(".cc-modal-x").addEventListener("click", close);
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) { close(); return; }
+    const card = e.target.closest(".mb-card");
+    if (card) { close(); selectAgent(card.dataset.id); }
+  });
+}
+
+// 사이드바 작업 우클릭 메뉴 — 삭제·별도창·복제(prompt 재사용)·중지
+function showWsContextMenu(id, x, y){
+  document.querySelector(".ws-ctx")?.remove();
+  const a = state.get(id); if (!a) return;
+  const menu = document.createElement("div");
+  menu.className = "ws-ctx";
+  menu.style.left = x + "px"; menu.style.top = y + "px";
+  const isRunning = ["running","creating","warming"].includes(a.status);
+  menu.innerHTML = `
+    <button data-act="select">📂 ${esc(t("ctxSelect") || "열기")}</button>
+    <button data-act="popout">🪟 ${esc(t("ctxPopout") || "별도 창")}</button>
+    ${isRunning ? `<button data-act="stop">⏹ ${esc(t("ctxStop") || "중지")}</button>` : ""}
+    <button data-act="dup">📑 ${esc(t("ctxDup") || "프롬프트 복제")}</button>
+    <div class="ws-ctx-sep"></div>
+    <button data-act="del" class="danger">🗑 ${esc(t("wsDelTip") || "이 작업 삭제")}</button>
+  `;
+  document.body.appendChild(menu);
+  // 화면 밖 클램프
+  const r = menu.getBoundingClientRect();
+  if (r.right > window.innerWidth) menu.style.left = (window.innerWidth - r.width - 8) + "px";
+  if (r.bottom > window.innerHeight) menu.style.top = (window.innerHeight - r.height - 8) + "px";
+  const close = () => menu.remove();
+  menu.addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-act]"); if (!b) return;
+    const act = b.dataset.act;
+    close();
+    if (act === "select") { selectAgent(id); }
+    else if (act === "popout") { invoke("open_task_window", { id, panel: rightPanel || "git" }).catch(()=>{}); }
+    else if (act === "stop") { invoke("stop_agent", { id }).catch(()=>{}); }
+    else if (act === "dup") { $("#prompt").value = a.prompt || ""; $("#prompt").focus(); }
+    else if (act === "del") { confirmAndDeleteAgent(id); }
+  });
+  setTimeout(() => document.addEventListener("click", close, { once: true }), 0);
+  document.addEventListener("contextmenu", close, { once: true });
+}
+
+async function confirmAndDeleteAgent(id){
+  const a = state.get(id); if (!a) return;
+  const msg = (t("delConfirm") || "이 작업을 삭제할까요?") + `\n\n${esc(a.prompt || a.branch || a.id)}`;
+  // app dialog 사용 — 우리 메모리 규칙(use-app-dialogs-not-native): native confirm 금지
+  if (!await uiConfirm(msg)) return;
+  try { await invoke("cleanup_agent", { id }); }
+  catch (e) { showToast("삭제 실패: " + String(e), "err", 4000); }
+}
+
+// 간단 app-dialog 확인창 — Promise<boolean>. native confirm 대체.
+function uiConfirm(msg){
+  return new Promise((resolve) => {
+    const m = document.createElement("div");
+    m.className = "cc-modal";
+    m.innerHTML = `<div class="cc-modal-card" style="max-width:380px">
+      <div class="cc-modal-body" style="padding:18px 20px;white-space:pre-wrap">${esc(msg)}</div>
+      <div class="cc-modal-foot">
+        <button class="btn" data-r="0">${esc(t("cancel") || "취소")}</button>
+        <button class="btn primary" data-r="1">${esc(t("confirm") || "확인")}</button>
+      </div>
+    </div>`;
+    document.body.appendChild(m);
+    m.addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-r]");
+      if (e.target === m) { m.remove(); resolve(false); return; }
+      if (!b) return;
+      m.remove(); resolve(b.dataset.r === "1");
+    });
+  });
 }
 
 function renderTabs(){
@@ -1970,6 +2188,36 @@ function bindRightTabs(){
   });
 }
 
+// 미니맵 파일 노드 클릭 → read_file_preview → 미리보기 박스에 렌더(prettify)
+function bindMinimapFileClicks(a){
+  if (!a) return;
+  const root = document.querySelector("#gitpanel .mm-tree-svg");
+  if (!root) return;
+  root.addEventListener("click", async (e) => {
+    const g = e.target.closest("g.mm-svg-node[data-mm-file]");
+    if (!g) return;
+    const rel = g.getAttribute("data-mm-file");
+    const box = document.getElementById("mmPreview-" + a.id);
+    if (!box || !rel) return;
+    box.hidden = false;
+    box.innerHTML = `<div class="mm-prev-head"><b>${esc(rel)}</b> <button class="mm-prev-x" aria-label="close">×</button><span class="mm-prev-loading">불러오는 중…</span></div>`;
+    try {
+      const text = await invoke("read_file_preview", { id: a.id, rel });
+      const ext = (rel.match(/\.([a-zA-Z0-9]+)$/) || [,""])[1].toLowerCase();
+      const lines = text.split("\n");
+      const N = Math.min(lines.length, 400); // 400줄 컷
+      const code = lines.slice(0, N).map((ln, i) => `<div class="mm-prev-ln"><span class="ln-no">${i+1}</span><code>${esc(ln)}</code></div>`).join("");
+      const more = lines.length > N ? `<div class="mm-prev-more">… +${lines.length - N}줄 더 (미리보기는 최대 400줄)</div>` : "";
+      box.innerHTML = `<div class="mm-prev-head"><b>${esc(rel)}</b> <span class="mm-prev-meta">${lines.length}줄 · .${esc(ext)}</span><button class="mm-prev-x" aria-label="close">×</button></div>
+        <pre class="mm-prev-body lang-${esc(ext)}">${code}${more}</pre>`;
+    } catch (err) {
+      box.innerHTML = `<div class="mm-prev-head"><b>${esc(rel)}</b> <button class="mm-prev-x" aria-label="close">×</button></div>
+        <div class="mm-prev-err">미리보기 실패: ${esc(String(err))}</div>`;
+    }
+    box.querySelector(".mm-prev-x")?.addEventListener("click", () => { box.hidden = true; });
+  }, { once: false });
+}
+
 function renderGit(){
   const gp = $("#gitpanel"); if (!gp) return;
   if (!(selectedId && state.has(selectedId))){
@@ -1984,6 +2232,7 @@ function renderGit(){
     gp.innerHTML = _dockCtrlHtml + rightTabsHtml() +
       `<div class="rp-body">${renderMinimap(_aFor)}</div>`;
     bindGitDock(); bindRightTabs();
+    bindMinimapFileClicks(a);
     return;
   }
   if (rightPanel === "terminal"){
@@ -2042,7 +2291,18 @@ function renderGit(){
 }
 
 // 사이드바/탭 클릭(이벤트 위임) + 새 작업
-$("#wsList").addEventListener("click", (e) => { const row = e.target.closest(".ws-item"); if (row) selectAgent(row.dataset.id); });
+$("#wsList").addEventListener("click", (e) => {
+  // 삭제 버튼은 부모 선택보다 우선
+  const delBtn = e.target.closest('[data-act="ws-del"]');
+  if (delBtn) {
+    e.stopPropagation();
+    const row = delBtn.closest(".ws-item");
+    if (row) confirmAndDeleteAgent(row.dataset.id);
+    return;
+  }
+  const row = e.target.closest(".ws-item");
+  if (row) selectAgent(row.dataset.id);
+});
 $("#agentTabs").addEventListener("click", (e) => {
   const x = e.target.closest("[data-x]"); if (x){ e.stopPropagation(); closeTab(x.dataset.x); return; }
   if (e.target.closest(".atab.new")){ showComposer({ reset: true }); return; }

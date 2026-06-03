@@ -479,6 +479,32 @@ fn pty_close(state: tauri::State<'_, AppState>, label: String) -> Result<(), Str
     Ok(())
 }
 
+// 작업의 worktree 내부 상대경로 파일을 읽어 UI 미리보기 용도로 돌려준다.
+// 보안: ① 무조건 작업의 worktree 안 ② canonicalize 후 다시 worktree 안 검증 ③ 최대 256KB.
+#[tauri::command]
+fn read_file_preview(state: tauri::State<'_, AppState>, id: String, rel: String) -> Result<String, String> {
+    let agents = state.agents.lock().unwrap();
+    let a = agents.get(&id).ok_or_else(|| format!("작업 없음: {id}"))?;
+    let wt = std::path::PathBuf::from(&a.worktree);
+    if !wt.exists() { return Err("worktree 없음".into()); }
+    // ../ 등 탈출 방지: 입력 rel을 components로 분해해 '..'·절대경로 거부
+    let rel_path = std::path::PathBuf::from(&rel);
+    for c in rel_path.components() {
+        use std::path::Component;
+        if matches!(c, Component::ParentDir | Component::RootDir | Component::Prefix(_)) {
+            return Err("경로 탈출 시도 거부".into());
+        }
+    }
+    let full = wt.join(&rel_path);
+    // canonicalize 후 한 번 더 확인
+    let wt_can = wt.canonicalize().map_err(|e| format!("worktree canon 실패: {e}"))?;
+    let full_can = full.canonicalize().map_err(|e| format!("파일 canon 실패: {e}"))?;
+    if !full_can.starts_with(&wt_can) { return Err("worktree 밖 파일".into()); }
+    let meta = std::fs::metadata(&full_can).map_err(|e| format!("metadata: {e}"))?;
+    if meta.len() > 256 * 1024 { return Err(format!("파일이 너무 커요({} bytes) — 미리보기는 256KB 이하", meta.len())); }
+    std::fs::read_to_string(&full_can).map_err(|e| format!("읽기 실패: {e}"))
+}
+
 // ---------------- 커맨드: 온보딩 환경 설정 ----------------
 // ~/.claude 에 전문가/스킬/커맨드 설치 + 훅(범위 선택) + 팀 플래그 활성화.
 //
@@ -736,6 +762,7 @@ fn create_agent(
     keepgoing: Option<bool>,
     team: Option<bool>,
     authmode: Option<String>,
+    parallel: Option<bool>,
 ) -> Result<String, String> {
     if !PathBuf::from(&repo).join(".git").exists() {
         return Err(format!("선택한 폴더가 git 프로젝트가 아닙니다: {repo}"));
@@ -786,6 +813,12 @@ fn create_agent(
     state.agents.lock().unwrap().insert(id.clone(), info.clone());
     let _ = app.emit("agent_update", info);
     // 사용자 요청을 '맨 앞'에 두어 절대 묻히지 않게 하고, 오케스트레이션 안내는 짧게 뒤에 붙인다.
+    let parallel_on = parallel.unwrap_or(false);
+    let parallel_hint = if parallel_on {
+        "\n\n🚀 병렬 모드(강제) — 첫 어시스턴트 턴부터 **반드시 3~7개의 독립 Task 도구 호출을 동시에** 발행하세요. \
+각 Task는 서로 다른 영역(파일/계층)을 다뤄 충돌이 없게. 단발 작업이면 분할이 불가능하니 그 경우에만 단일 Task로 진행. \
+서브에이전트 결과를 모은 후 다음 라운드 분할을 또 시도하세요. **순차 처리는 금지**."
+    } else { "" };
     let effective_prompt = if team_on {
         format!(
             "{prompt}\n\n\
@@ -794,12 +827,12 @@ fn create_agent(
 사용 가능한 전문가: oracle(설계·근본원인), librarian(검색·문서), implementer(구현), debugger(디버깅·재현), \
 code-reviewer(읽기전용 리뷰), plan(계획 형식화), security(읽기전용 보안).\n\
 2) 독립적인 조각은 **한 어시스턴트 턴에 여러 Task를 동시에 호출**해 병렬로 진행하세요.\n\
-3) 모든 Task 결과를 모아 검토한 뒤 마지막에 누가/무엇을/어떤 결과를 냈는지 한국어로 요약하세요."
+3) 모든 Task 결과를 모아 검토한 뒤 마지막에 누가/무엇을/어떤 결과를 냈는지 한국어로 요약하세요.{parallel_hint}"
         )
     } else {
         match agent.as_deref() {
             Some(name) if !name.is_empty() => format!(
-                "{prompt}\n\n— 위 요청을 `{name}` 전문가(서브에이전트)에게 위임해 끝까지 처리하고, 끝나면 무엇을 했는지 한국어로 요약하세요."
+                "{prompt}\n\n— 위 요청을 `{name}` 전문가(서브에이전트)에게 위임해 끝까지 처리하고, 끝나면 무엇을 했는지 한국어로 요약하세요.{parallel_hint}"
             ),
             // 기본: 오케스트레이터가 전문가·스킬을 스스로 고른다 (병렬 위임 강조)
             _ => format!(
@@ -807,7 +840,7 @@ code-reviewer(읽기전용 리뷰), plan(계획 형식화), security(읽기전�
 — 위 요청을 끝까지 처리하세요. 당신은 오케스트레이터로서, 일을 작은 조각으로 나눈 뒤 적합한 전문가(서브에이전트: oracle/librarian/implementer/debugger/code-reviewer/plan/security)에게 \
 **Task 도구로 위임**하세요. 서로 독립적인 조각은 **한 어시스턴트 턴에 Task들을 모아 동시에 호출**해 병렬로 진행하세요. \
 스킬은 자유롭게 쓰고, 마땅한 게 없는데 재사용할 가치가 있으면 새 스킬을 만들어도 됩니다. 모호한 점은 합리적으로 가정해 진행하고, \
-끝나면 누가/무엇을 했고 결과가 무엇인지 한국어로 짧게 요약하세요."
+끝나면 누가/무엇을 했고 결과가 무엇인지 한국어로 짧게 요약하세요.{parallel_hint}"
             ),
         }
     };
@@ -2090,7 +2123,8 @@ pub fn run() {
             pty_open,
             pty_write,
             pty_resize,
-            pty_close
+            pty_close,
+            read_file_preview
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

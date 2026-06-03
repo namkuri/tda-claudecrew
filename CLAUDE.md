@@ -157,6 +157,11 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **비동기 enterApp**: `check_claude`/`get_cost_cap`/`check_api_mode`/`loadAgents`/`refreshUsage`를 `Promise.allSettled`로 병렬. 화면이 즉시 응답하고 컴포저 입력 가능. 우상단에 떠다니는 **부트 토스트**(스피너 + "준비 중…"/"이전 작업 복원 중…"). 완료 자동 숨김.
   - **detached 양방향**: 별도 창에서 보던 작업이 메인에서 `agent_removed`로 제거되면 친화 메시지 "⚠ 이 작업이 메인에서 제거되었어요. 창을 닫아도 좋아요."
   - **분할 패널 모드**: 메인 콘솔 헤더에 **⊟ 분할** 탭 추가 — 콘솔(좌)과 미니맵(우) 동시 표시. `cc_pane_<id>` localStorage 영속화. 좁은 창에서는 자동 상하 분할.
+- **미니맵·작업 관리·병렬 모드 강화(v0.22.0)**:
+  - **에이전트 아이콘 상태별 분기**: 실행 중(running/creating/warming)에만 path 애니메이션, done/error/stopped는 마지막 활동 노드에 고정 + "완료/실패/정지" 라벨. 라벨은 외곽선(stroke #000) + 밝은 색(#f5e8dc)로 가시성 확보. 서브에이전트는 작은 보조 배지로 마지막 노드 주변 분산 배치.
+  - **미니맵 파일 클릭 → 코드 미리보기**: `read_file_preview(id, rel)` 백엔드 커맨드(worktree 경계 검증 + 256KB·400줄 컷). UI에서 파일 노드 클릭 시 활동 로그 위에 line-number 박스로 prettify 미리보기. 보안: `..`/RootDir/Prefix 거부, canonicalize 후 worktree 안 검증.
+  - **사이드바 작업 삭제 + 우클릭 메뉴**: 각 `.ws-item` 우상단 ✕ 버튼(hover 시 노출) + 우클릭 컨텍스트 메뉴(열기/별도창/중지/프롬프트 복제/삭제). 삭제는 `uiConfirm` 모달 다이얼로그 후 `cleanup_agent`.
+  - **🚀 병렬 분할 토글 + 📊 통합 모니터링 보드**: 토글 ON 시 `create_agent` 호출에 `parallel: true` 전달 → 백엔드가 effective_prompt에 "첫 어시스턴트 턴부터 3~7개 Task 동시 호출 강제, 순차 처리 금지" 강력 지시 추가. 헤더 `📊 보드` → 모든 작업을 grid 카드(2~3열)로 표시. 카드별 status, 경과시간, 토큰, 위임 서브 수, 최근 도구. 카드 클릭 → 해당 작업 선택.
 - **PTY/xterm.js 내장 + 온보딩 자동 진행(v0.21.0)**:
   - **portable-pty 백엔드**: `pty_open(label,cwd,cmd,args,cols,rows)` / `pty_write` / `pty_resize` / `pty_close` 커맨드. 스레드가 master에서 읽어 `emit("pty_data")`. ConPTY(Windows)/Unix pty 모두 지원.
   - **xterm.js 내장 터미널**: `ui/vendor/xterm.js + xterm-addon-fit + xterm.css` 로컬 번들. 우측 패널 4번째 탭 `🖥 터미널` — claude REPL을 앱 안에서 직접. /login 같은 슬래시 커맨드도 OK.
