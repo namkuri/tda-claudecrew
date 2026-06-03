@@ -134,6 +134,15 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **전문가 아이콘 매핑**(`EXPERT_BADGES`): orchestrator 🧠 · team 🧑‍💼 · oracle 🔮 · librarian 📚 · implementer 🛠️ · debugger 🐞 · code-reviewer 🔍 · plan 📋 · security 🛡️. 사이드바·오케스트 바·서브 콘솔 헤더 모두 적용.
   - **스티키 스크롤**: 사용자가 위로 올린 동안엔 자동 추적 중지(`_stickyEls`), 다시 하단 도달 시 재개. 위로 올렸을 때 우측 하단 "↓ 새 내용 보기" 떠다니는 버튼.
   - **worktree 안전 강화**: `cleanup_agent`가 `worktree remove` 외에 `git branch -D ab/<branch>` + `git worktree prune` 까지 호출(동명 작업 충돌·stale 레코드 방지). `restore_agents`도 시작 시 `prune` 호출.
+- **멀티 윈도우(v0.11.0 — Phase 1/4 of 3-1)**:
+  - `open_task_window(id)` 커맨드(`WebviewWindowBuilder`)가 `task-<id>` 라벨로 새 창 생성. URL `?detached=1&taskId=<id>` 쿼리. 이미 열려 있으면 포커스.
+  - UI: 부트 시 URL 쿼리 감지 → `html.detached` 클래스 → 사이드바/Git 패널/탭바/온보딩 숨김 → 중앙 풀스크린. selectedId = DETACHED_ID.
+  - Tauri emit 은 모든 창에 broadcast → **메인 ↔ 별도 창 상태 자동 동기화**(추가 IPC 불필요).
+  - 액션바에 **🪟 별도 창** 버튼. 새 빌드 자동 빌드 중.
+- **다음 회차 — Phase 2~4 of 3-1**:
+  - **P2 도킹/탭 드래그**: 패널 시스템(콘솔/Git/검증/미니맵) + 드래그 도킹 + LocalStorage 영속화.
+  - **P3 시간축 + 재생**: `.cc-timeline.jsonl` 영속화 + UI 슬라이더 + 재생/돌려감기.
+  - **P4 Git 미니맵**: 디렉토리 트리 시각화 + 에이전트 행동(읽기/쓰기/검색/실행) 아이콘 오버레이.
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.

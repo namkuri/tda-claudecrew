@@ -10,6 +10,12 @@ const { invoke, listen, dialog } = DEMO
   : { invoke: window.__TAURI__.core.invoke, listen: window.__TAURI__.event.listen, dialog: window.__TAURI__.dialog };
 if (DEMO) console.warn("[ClaudeCrew] Demo mode (no Tauri backend) — using mock data. Real install runs as the desktop app.");
 
+// ── 멀티 윈도우: URL ?detached=1&taskId=<id> 면 단일 작업 풀스크린 모드 ──
+const _qs = new URLSearchParams(location.search);
+const DETACHED = _qs.get("detached") === "1";
+const DETACHED_ID = _qs.get("taskId") || null;
+if (DETACHED) document.documentElement.classList.add("detached");
+
 // ---------- 다국어 (i18n) ----------
 const I18N = {
   ko: {
@@ -75,6 +81,7 @@ const I18N = {
     prettyTitle: "Pretty 모드 — 도구 호출 그룹 접힘 + Markdown 렌더 + 추론/답변 구분",
     thinkingLabel: "추론", answerLabel: "답변", expandAll: "모두 펼치기", collapseAll: "모두 접기",
     scrollDown: "↓ 새 내용 보기",
+    popout: "🪟 별도 창", popoutTitle: "이 작업만 별도 창으로 분리해서 보기",
     wtPath: "작업 공간(worktree)", wtOpen: "📁 폴더 열기", wtTitle: "Git worktree — 원본 폴더와 격리된 별도 작업 공간",
     verify: "🧪 자동 검증", verifying: "검증 중…", verifyPass: "검증 통과", verifyFail: "검증 실패",
     verifySkipped: "감지된 빌드 시스템 없음(검증 생략)", verifyFailedTip: "검증 실패 — 그래도 적용하시려면 다시 누르세요.",
@@ -154,6 +161,7 @@ const I18N = {
     prettyTitle: "Pretty mode — collapse tool-call groups + render Markdown + separate thinking/answer",
     thinkingLabel: "Thinking", answerLabel: "Answer", expandAll: "Expand all", collapseAll: "Collapse all",
     scrollDown: "↓ Jump to latest",
+    popout: "🪟 Pop out", popoutTitle: "Open this task in its own window",
     wtPath: "Workspace (worktree)", wtOpen: "📁 Open folder", wtTitle: "Git worktree — an isolated working tree separate from your main folder",
     verify: "🧪 Auto-verify", verifying: "Verifying…", verifyPass: "Verified", verifyFail: "Verification failed",
     verifySkipped: "No detected build system (skipped)", verifyFailedTip: "Verification failed — press Apply again to override.",
@@ -262,6 +270,7 @@ function makeDemoApi(){
                                 return Promise.resolve({ available:false, today_tokens:0, week_tokens:0, today_messages:0, week_messages:0, total_messages:0, total_sessions:0, models:[] });
       case "open_path":         console.log("[demo] open_path", args.path); return Promise.resolve();
       case "get_base_branch":   return Promise.resolve("main");
+      case "open_task_window":  window.open(location.pathname + "?detached=1&taskId=" + args.id, "task-" + args.id, "width=1100,height=760"); return Promise.resolve();
       case "verify_changes":    return Promise.resolve({ ran:true, success:true, note:"감지됨: Node", steps:[
         { name:"npm", command:"npm run build", success:true, stdout:"built", stderr:"" },
         { name:"npm", command:"npm test", success:true, stdout:"3 passed", stderr:"" },
@@ -552,6 +561,15 @@ $("#btnStart").addEventListener("click", () => {
 
 // ---------- 메인 ----------
 function enterApp(){
+  // detached: 단일 작업 풀스크린 — 사이드바·탭바 숨김, 해당 작업만 자동 선택
+  if (DETACHED && DETACHED_ID) {
+    document.body.classList.add("detached-body");
+    // 메인 창이 보낸 상태가 도착할 때까지 잠시 빈 화면. agent_update 가 오면 자동 선택됨.
+    selectedId = DETACHED_ID;
+    // detached 창에서는 작업 복원/체크 같은 글로벌 호출은 메인 창이 담당하므로 호출 안 함
+    render();
+    return;
+  }
   $("#repoName").textContent = repoBaseName();
   // Claude 연결/모델 표시
   $("#csDot").classList.toggle("on", true);
@@ -1152,6 +1170,7 @@ function renderAgentView(a){
        <button data-act="verify">${a._verifying ? t("verifying") : t("verify")}</button>
        <button data-act="apply" class="primary"${a._verify && !a._verify.success && a._verify.ran ? ` title="${esc(t("verifyFailedTip"))}"` : ""}>${t("avApply")}${a._verify && !a._verify.success && a._verify.ran ? " ⚠" : ""}</button>
        <button data-act="diff">${t("avDiff")}</button>
+       ${DETACHED ? "" : `<button data-act="popout" title="${esc(t("popoutTitle"))}">${t("popout")}</button>`}
        <button data-act="stop">${t("avStop")}</button>
        <button data-act="cleanup">${t("avRevert")}</button>
      </div>`;
@@ -1160,6 +1179,8 @@ function renderAgentView(a){
   av.querySelector('[data-act="diff"]').onclick = () => viewDiff(a.id);
   av.querySelector('[data-act="stop"]').onclick = () => invoke("stop_agent", { id: a.id });
   av.querySelector('[data-act="cleanup"]').onclick = () => { if (confirm(t("cleanupConfirm"))) invoke("cleanup_agent", { id: a.id }); };
+  const popoutBtn = av.querySelector('[data-act="popout"]');
+  if (popoutBtn) popoutBtn.onclick = () => { invoke("open_task_window", { id: a.id }).catch(e => alert(t("opFail") + e)); };
   const verifyBtn = av.querySelector('[data-act="verify"]');
   if (verifyBtn) verifyBtn.onclick = async () => {
     a._verifying = true; renderStage();
@@ -1366,4 +1387,11 @@ if (DEMO) {
   document.body.appendChild(d);
 }
 applyI18n();
-refreshWizard();
+if (DETACHED && DETACHED_ID) {
+  // detached: 온보딩 단계 우회. 메인 창에서 만든 작업 상태가 emit 으로 전파됨.
+  $("#onboarding").classList.add("hidden");
+  $("#app").classList.remove("hidden");
+  enterApp();
+} else {
+  refreshWizard();
+}

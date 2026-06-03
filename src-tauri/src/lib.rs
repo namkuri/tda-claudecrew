@@ -10,7 +10,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 // ---------------- 상태 ----------------
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -1287,6 +1287,37 @@ fn open_path(app: AppHandle, path: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+// ---------------- 커맨드: 작업을 별도 창으로 띄움(멀티 윈도우) ----------------
+// 같은 frontend HTML을 새 창으로 열고 URL 쿼리(?detached=1&taskId=<id>)로 'detached' 모드 진입.
+// 이미 같은 라벨의 창이 떠 있으면 그 창을 포커스. Tauri 의 emit은 모든 창으로 broadcast되므로
+// 상태 동기화(agent_update/output/done)는 자동으로 흘러간다.
+#[tauri::command]
+fn open_task_window(app: AppHandle, id: String) -> Result<(), String> {
+    let label = format!("task-{id}");
+    if let Some(existing) = app.get_webview_window(&label) {
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+    // 작업 메타로 창 타이틀 만들기
+    let title = {
+        let state = app.state::<AppState>();
+        let agents = state.agents.lock().unwrap();
+        agents.get(&id).map(|a| {
+            let p = a.prompt.lines().next().unwrap_or("").chars().take(60).collect::<String>();
+            if p.is_empty() { format!("ClaudeCrew · {}", a.branch) } else { format!("ClaudeCrew · {}", p) }
+        }).unwrap_or_else(|| format!("ClaudeCrew · {label}"))
+    };
+    let url = WebviewUrl::App(format!("index.html?detached=1&taskId={id}").into());
+    WebviewWindowBuilder::new(&app, &label, url)
+        .title(&title)
+        .inner_size(1100.0, 760.0)
+        .min_inner_size(720.0, 480.0)
+        .build()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 // ---------------- 커맨드: 목록 ----------------
 #[tauri::command]
 fn list_agents(app: AppHandle) -> Vec<AgentInfo> {
@@ -1805,7 +1836,8 @@ pub fn run() {
             send_message,
             open_path,
             get_base_branch,
-            verify_changes
+            verify_changes,
+            open_task_window
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

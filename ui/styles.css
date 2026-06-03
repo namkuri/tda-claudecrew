@@ -123,6 +123,13 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 
 /* ============ Superset식 3-컬럼 워크스테이션 ============ */
 #app{height:100vh;display:grid;grid-template-columns:266px 1fr 340px;grid-template-rows:minmax(0,1fr) auto auto;overflow:hidden}
+
+/* detached 모드 — 단일 작업 풀스크린: 사이드바·Git 패널·탭바 숨김 */
+.detached #app{grid-template-columns:1fr}
+.detached .sidebar,.detached .gitpanel,.detached .agent-tabs{display:none!important}
+.detached .center{grid-column:1/-1}
+.detached #onboarding{display:none!important}
+.detached-body{background:var(--bg)}
 .sidebar{grid-row:1;grid-column:1}
 .center{grid-row:1;grid-column:2}
 .gitpanel{grid-row:1;grid-column:3}
