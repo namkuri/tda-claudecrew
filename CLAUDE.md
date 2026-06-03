@@ -152,6 +152,11 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **상태 영속화**: `cc_gitDock` LocalStorage. 앱 재시작 후에도 사용자가 선택한 위치 유지.
   - **사이드바 ↩ Git 재오픈 버튼**: 숨김 모드일 때만 등장, 클릭 시 우측 복귀.
   - 데모 검증: 기본 right → bottom → hidden(display:none + 재오픈 버튼 등장) → right 복귀, localStorage 동기화 확인.
+- **부트 lag 해소 + 양방향 보강 + 분할 모드(v0.14.0)**:
+  - **빠른 복원**: `restore_agents`가 작업당 `output` 마지막 200줄만 반환(부트 즉시). 사용자가 작업 선택 시 `selectAgent → ensureFullOutput()` → `load_agent_output(id)` 커맨드로 전체 output 디스크에서 lazy 로드. `_outputTruncated`/`_outputFullLoaded` 플래그로 중복 호출 방지.
+  - **비동기 enterApp**: `check_claude`/`get_cost_cap`/`check_api_mode`/`loadAgents`/`refreshUsage`를 `Promise.allSettled`로 병렬. 화면이 즉시 응답하고 컴포저 입력 가능. 우상단에 떠다니는 **부트 토스트**(스피너 + "준비 중…"/"이전 작업 복원 중…"). 완료 자동 숨김.
+  - **detached 양방향**: 별도 창에서 보던 작업이 메인에서 `agent_removed`로 제거되면 친화 메시지 "⚠ 이 작업이 메인에서 제거되었어요. 창을 닫아도 좋아요."
+  - **분할 패널 모드**: 메인 콘솔 헤더에 **⊟ 분할** 탭 추가 — 콘솔(좌)과 미니맵(우) 동시 표시. `cc_pane_<id>` localStorage 영속화. 좁은 창에서는 자동 상하 분할.
 - **훅(T1)**: `src-tauri/hooks/*.{ps1,sh}`(OS 두 벌)를 `~/.claude/claudecrew-hooks/`에 설치(.ps1은 BOM)하고
   `settings.json`의 `hooks`에 절대경로로 병합. PreToolUse(Bash 위험차단)·PostToolUse(Write|Edit prettier)·
   Stop·TeammateIdle(끝까지 모드, `CLAUDECREW_KEEPGOING=1`)·TaskCompleted(품질 게이트). exit 0=진행, 2=차단/계속.

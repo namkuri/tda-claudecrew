@@ -165,6 +165,12 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 /* 사이드바의 'Git 패널 다시 열기' 버튼 */
 .btn-reopen-git{background:var(--accent);color:#06231d;border:none;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;font-weight:700}
 
+/* 부트 로딩 토스트 — 입력 방해 X, 화면 우상단에 떠다님 */
+.boot-toast{position:fixed;top:14px;right:14px;z-index:60;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:7px 14px 7px 12px;font-size:12px;color:var(--ink);box-shadow:0 4px 14px rgba(0,0,0,.4);display:inline-flex;align-items:center;gap:8px}
+.boot-spin{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:bootspin .9s linear infinite;display:inline-block;flex:none}
+@keyframes bootspin{to{transform:rotate(360deg)}}
+.detached-removed{padding:40px 30px;text-align:center;color:var(--err);font-size:14px}
+
 /* 좌: 워크스페이스 사이드바 */
 .sidebar{display:flex;flex-direction:column;border-right:1px solid var(--line);background:var(--panel);min-height:0}
 .side-top{display:flex;align-items:center;justify-content:space-between;padding:14px 16px}
@@ -421,6 +427,11 @@ select{background:#0b0e11;color:var(--ink);border:1px solid var(--line);border-r
 
 /* 미니맵 (P4) */
 .con-body.minimap{padding:0;background:var(--bg)}
+/* 분할 모드: 좌(콘솔) | 우(미니맵) */
+.con-body.splitp{display:grid;grid-template-columns:1fr 1fr;padding:0;min-height:280px}
+.con-body.splitp .splitp-term{padding:14px 16px;overflow:auto;border-right:1px solid var(--line)}
+.con-body.splitp .splitp-map{overflow:auto}
+@media(max-width:1100px){ .con-body.splitp{grid-template-columns:1fr;grid-template-rows:1fr 1fr} .con-body.splitp .splitp-term{border-right:none;border-bottom:1px solid var(--line)} }
 .mm-grid{display:grid;grid-template-columns:1fr 1fr;height:100%;min-height:280px}
 .mm-tree,.mm-log{padding:10px 14px;overflow:auto;font-size:12px}
 .mm-tree{border-right:1px solid var(--line)}

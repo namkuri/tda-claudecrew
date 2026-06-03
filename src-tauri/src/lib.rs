@@ -1305,6 +1305,25 @@ fn open_path(app: AppHandle, path: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+// ---------------- 커맨드: 전체 output을 lazy 로드 (#2 부트 지연 방지) ----------------
+// restore_agents 는 빠른 부트를 위해 output 마지막 200줄만 반환.
+// 사용자가 그 작업을 클릭/선택할 때 이 커맨드로 전체 output을 디스크에서 읽어 메모리에 채운다.
+#[tauri::command]
+fn load_agent_output(app: AppHandle, id: String) -> Result<Vec<String>, String> {
+    let state = app.state::<AppState>();
+    let worktree = state.agents.lock().unwrap().get(&id).map(|a| a.worktree.clone()).unwrap_or_default();
+    if worktree.is_empty() { return Ok(Vec::new()); }
+    let state_path = PathBuf::from(&worktree).join(".cc-state.json");
+    let text = std::fs::read_to_string(&state_path).map_err(|e| e.to_string())?;
+    let parsed: AgentInfo = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    // 메모리에도 반영(같은 작업을 다시 select 할 때 중복 호출 방지)
+    {
+        let mut agents = state.agents.lock().unwrap();
+        if let Some(a) = agents.get_mut(&id) { a.output = parsed.output.clone(); }
+    }
+    Ok(parsed.output)
+}
+
 // ---------------- 커맨드: 작업 타임라인 조회 (P3 시간축 재생용) ----------------
 // .cc-timeline.jsonl 의 각 줄을 파싱해 [{t, text}, ...] 로 돌려준다.
 // UI는 슬라이더로 t 기준 cut-off 만들어 그 시점까지의 텍스트만 그릴 수 있음.
@@ -1389,16 +1408,21 @@ fn restore_agents(app: AppHandle, repo: String) -> Vec<AgentInfo> {
                     *c += 1;
                     format!("r{}", *c)
                 };
-                // 디스크 영속화 파일이 있으면 그걸로 진짜 복원, 없으면 메타만으로
+                // 디스크 영속화 파일이 있으면 그걸로 진짜 복원, 없으면 메타만으로.
+                // ⚠ 빠른 부트를 위해 output은 마지막 200줄로 잘라 반환(전체는 load_agent_output 으로 lazy 로드).
                 let state_path = PathBuf::from(&wt).join(".cc-state.json");
                 let info = std::fs::read_to_string(&state_path)
                     .ok()
                     .and_then(|s| serde_json::from_str::<AgentInfo>(&s).ok())
                     .map(|mut a| {
-                        // 재시작 후엔 실행 중일 수 없으니 상태/pid 정리
                         a.id = id.clone();
                         a.pid = None;
                         if a.status == "running" || a.status == "creating" { a.status = "stopped".into(); }
+                        // output 마지막 200줄만(나머지는 lazy)
+                        if a.output.len() > 200 {
+                            let cut = a.output.len() - 200;
+                            a.output.drain(..cut);
+                        }
                         a
                     })
                     .unwrap_or_else(|| AgentInfo {
@@ -1869,7 +1893,8 @@ pub fn run() {
             get_base_branch,
             verify_changes,
             open_task_window,
-            get_timeline
+            get_timeline,
+            load_agent_output
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

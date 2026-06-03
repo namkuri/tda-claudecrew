@@ -10,9 +10,10 @@ const { invoke, listen, dialog } = DEMO
   : { invoke: window.__TAURI__.core.invoke, listen: window.__TAURI__.event.listen, dialog: window.__TAURI__.dialog };
 if (DEMO) console.warn("[ClaudeCrew] Demo mode (no Tauri backend) — using mock data. Real install runs as the desktop app.");
 
-// ── P4: 메인 콘솔의 패널 탭 ('console' | 'map') ──
+// ── P4: 메인 콘솔의 패널 탭 ('console' | 'map' | 'split') ──
 const _pane = {};
-function setPane(id, p){ _pane[id] = p; renderStage(); }
+function setPane(id, p){ _pane[id] = p; localStorage.setItem("cc_pane_" + id, p); renderStage(); }
+function getPane(id){ return _pane[id] || localStorage.getItem("cc_pane_" + id) || "console"; }
 
 // output 라인을 파싱해 활동(파일/검색/명령)을 시간 순서대로 추출
 // → { tree: { ".": { children: {...} }}, activities: [{ kind, path, label, idx }] }
@@ -177,9 +178,11 @@ const I18N = {
     scrollDown: "↓ 새 내용 보기",
     popout: "🪟 별도 창", popoutTitle: "이 작업만 별도 창으로 분리해서 보기",
     tlPlay: "재생/일시정지", tlBack: "처음으로", tlLive: "라이브",
-    minimapTab: "미니맵", minimapTree: "📁 디렉토리(에이전트 활동)", minimapLog: "⏱ 활동 로그(최근 30)",
+    minimapTab: "미니맵", paneSplit: "분할", paneSplitTitle: "콘솔과 미니맵을 좌/우로 동시에 보기", minimapTree: "📁 디렉토리(에이전트 활동)", minimapLog: "⏱ 활동 로그(최근 30)",
     minimapEmpty: "아직 도구 활동이 없어요. 작업이 시작되면 여기에 표시됩니다.",
     minimapNoFiles: "(아직 파일 접근 없음)",
+    bootLoading: "준비 중…", bootRestoring: "이전 작업 복원 중…",
+    detachedRemoved: "이 작업이 메인에서 제거되었어요. 창을 닫아도 좋아요.",
     wtPath: "작업 공간(worktree)", wtOpen: "📁 폴더 열기", wtTitle: "Git worktree — 원본 폴더와 격리된 별도 작업 공간",
     verify: "🧪 자동 검증", verifying: "검증 중…", verifyPass: "검증 통과", verifyFail: "검증 실패",
     verifySkipped: "감지된 빌드 시스템 없음(검증 생략)", verifyFailedTip: "검증 실패 — 그래도 적용하시려면 다시 누르세요.",
@@ -261,9 +264,11 @@ const I18N = {
     scrollDown: "↓ Jump to latest",
     popout: "🪟 Pop out", popoutTitle: "Open this task in its own window",
     tlPlay: "Play/Pause", tlBack: "Rewind", tlLive: "LIVE",
-    minimapTab: "Minimap", minimapTree: "📁 Directory (agent activity)", minimapLog: "⏱ Recent activity (30)",
+    minimapTab: "Minimap", paneSplit: "Split", paneSplitTitle: "Show console and minimap side-by-side", minimapTree: "📁 Directory (agent activity)", minimapLog: "⏱ Recent activity (30)",
     minimapEmpty: "No tool activity yet. It'll appear here once the agent starts working.",
     minimapNoFiles: "(no file access yet)",
+    bootLoading: "Loading…", bootRestoring: "Restoring previous tasks…",
+    detachedRemoved: "This task was removed in the main window. You can close this window.",
     wtPath: "Workspace (worktree)", wtOpen: "📁 Open folder", wtTitle: "Git worktree — an isolated working tree separate from your main folder",
     verify: "🧪 Auto-verify", verifying: "Verifying…", verifyPass: "Verified", verifyFail: "Verification failed",
     verifySkipped: "No detected build system (skipped)", verifyFailedTip: "Verification failed — press Apply again to override.",
@@ -713,29 +718,45 @@ $("#btnStart").addEventListener("click", () => {
 });
 
 // ---------- 메인 ----------
-function enterApp(){
+// 헤더 로딩 토스트(부트/lazy 로드 시 사용) — 입력은 막지 않는 비방해 표시
+function showBoot(msg){
+  let el = $("#bootToast");
+  if (!el){
+    el = document.createElement("div");
+    el.id = "bootToast"; el.className = "boot-toast";
+    document.body.appendChild(el);
+  }
+  el.innerHTML = `<span class="boot-spin"></span> ${esc(msg)}`;
+  el.classList.remove("hidden");
+}
+function hideBoot(){ const el = $("#bootToast"); if (el) el.classList.add("hidden"); }
+
+async function enterApp(){
   // detached: 단일 작업 풀스크린 — 사이드바·탭바 숨김, 해당 작업만 자동 선택
   if (DETACHED && DETACHED_ID) {
     document.body.classList.add("detached-body");
-    // 메인 창이 보낸 상태가 도착할 때까지 잠시 빈 화면. agent_update 가 오면 자동 선택됨.
     selectedId = DETACHED_ID;
-    // detached 창에서는 작업 복원/체크 같은 글로벌 호출은 메인 창이 담당하므로 호출 안 함
     render();
     return;
   }
   $("#repoName").textContent = repoBaseName();
-  // Claude 연결/모델 표시
   $("#csDot").classList.toggle("on", true);
-  invoke("check_claude").then(v => {
-    $("#csModel").textContent = DEMO ? "Claude Code" : String(v).split("·")[0].trim() || "Claude Code";
-    $("#csPlan").textContent = DEMO ? t("demoConn") : t("connected");
-  }).catch(() => { $("#csDot").classList.remove("on"); $("#csPlan").textContent = t("disconnected"); });
-  loadAgents();
-  invoke("get_cost_cap").then(v => { if (v != null) $("#costCap").value = v; }).catch(()=>{});
+  showComposer(); // 빈 컴포저 먼저 보여 입력 즉시 가능
+
+  // 부트 — 비동기 작업들을 병렬로. 화면이 즉시 응답하고, 로딩 토스트로 진행을 안내
+  showBoot(t("bootLoading"));
+  const tasks = [
+    invoke("check_claude").then(v => {
+      $("#csModel").textContent = DEMO ? "Claude Code" : String(v).split("·")[0].trim() || "Claude Code";
+      $("#csPlan").textContent = DEMO ? t("demoConn") : t("connected");
+    }).catch(() => { $("#csDot").classList.remove("on"); $("#csPlan").textContent = t("disconnected"); }),
+    invoke("get_cost_cap").then(v => { if (v != null) $("#costCap").value = v; }).catch(()=>{}),
+    invoke("check_api_mode").then(on => { apiMode = !!on; $("#apiMode")?.classList.toggle("hidden", !apiMode); }).catch(()=>{}),
+    loadAgents(),
+    refreshUsage(),
+  ];
   syncTokenSeg();
-  showComposer();
-  // Claude Code 사용량(stats-cache) 동기화 — 즉시 + 15초 주기
-  refreshUsage();
+  try { await Promise.allSettled(tasks); } finally { hideBoot(); }
   if (!window.__usageTimer) window.__usageTimer = setInterval(refreshUsage, 15000);
   // 1초마다 헤더 메타(경과시간/whirlpool) 갱신 — 진행 중 작업에만 의미 있음
   if (!window.__tickTimer) window.__tickTimer = setInterval(() => {
@@ -958,8 +979,32 @@ $("#btnRun").addEventListener("click", async () => {
 async function loadAgents(){
   try {
     const useRestore = repoPath && !DEMO;
+    if (useRestore) showBoot(t("bootRestoring"));
     const list = await invoke(useRestore ? "restore_agents" : "list_agents", useRestore ? { repo: repoPath } : undefined);
-    if (Array.isArray(list)) { state.clear(); list.forEach(a => state.set(a.id, a)); render(); }
+    if (Array.isArray(list)) {
+      state.clear();
+      list.forEach(a => {
+        // 복원된 작업은 output 마지막 200줄만 받은 상태 — _outputTruncated 플래그
+        if (a.output && a.output.length >= 200) a._outputTruncated = true;
+        state.set(a.id, a);
+      });
+      render();
+    }
+  } catch (_) {}
+}
+
+// 선택 시 lazy 로 전체 output 가져오기(첫 select 한 번만)
+async function ensureFullOutput(id){
+  const a = state.get(id);
+  if (!a || !a._outputTruncated || a._outputFullLoaded) return;
+  a._outputFullLoaded = true;
+  try {
+    const full = await invoke("load_agent_output", { id });
+    if (Array.isArray(full) && full.length){
+      a.output = full;
+      a._outputTruncated = false;
+      if (selectedId === id) renderStage();
+    }
   } catch (_) {}
 }
 
@@ -1214,8 +1259,10 @@ function openTab(id){ if (!openTabs.includes(id)) openTabs.push(id); }
 function selectAgent(id){
   if (!state.has(id)) return;
   openTab(id); selectedId = id; render();
-  // 작업이 속한 저장소의 기준 브랜치를 검출해 라벨에 반영(가짜 'main' 하드코딩 제거)
+  // 1) 기준 브랜치 라벨
   invoke("get_base_branch", { id }).then(b => { if (b && b !== baseBranch) { baseBranch = b; render(); } }).catch(()=>{});
+  // 2) lazy 전체 output (부트 시엔 200줄만 받아서 빠르므로, 선택할 때 한 번만)
+  ensureFullOutput(id);
 }
 function closeTab(id){
   const i = openTabs.indexOf(id); if (i >= 0) openTabs.splice(i, 1);
@@ -1328,20 +1375,26 @@ function renderAgentView(a){
          <div class="con-head">
            <span class="con-dot ${a.status}"></span>
            <div class="pane-tabs">
-             <button class="pane-tab ${(_pane[a.id] || "console") === "console" ? "on" : ""}" data-pane="console">${esc(hasTeam ? t("orchestrator") : t("agentConsole"))}</button>
-             <button class="pane-tab ${_pane[a.id] === "map" ? "on" : ""}" data-pane="map">🗺 ${esc(t("minimapTab"))}</button>
+             <button class="pane-tab ${getPane(a.id) === "console" ? "on" : ""}" data-pane="console">${esc(hasTeam ? t("orchestrator") : t("agentConsole"))}</button>
+             <button class="pane-tab ${getPane(a.id) === "map" ? "on" : ""}" data-pane="map">🗺 ${esc(t("minimapTab"))}</button>
+             <button class="pane-tab ${getPane(a.id) === "split" ? "on" : ""}" data-pane="split" title="${esc(t("paneSplitTitle"))}">⊟ ${esc(t("paneSplit"))}</button>
            </div>
            <span class="con-st">${t("status_" + a.status) || a.status}</span>
          </div>
-         ${(_pane[a.id] || "console") === "console"
-           ? `<div class="con-body term${pretty ? " pretty" : ""}" id="term-${a.id}">${
-               logHtml
-                 ? logHtml
-                 : (a.status === "error"
-                     ? `<span style="color:var(--err)">❌ ${esc(t("noDiagInfo"))}</span>\n<span style="color:var(--dim)">${esc(t("noDiagHints"))}</span>`
-                     : `<span style="color:var(--faint)">${esc(t("termWaiting"))}</span>`)
-             }</div>`
-           : `<div class="con-body minimap" id="map-${a.id}">${renderMinimap(_aForRender)}</div>`}
+         ${(() => {
+           const p = getPane(a.id);
+           const termInner = logHtml
+             ? logHtml
+             : (a.status === "error"
+                 ? `<span style="color:var(--err)">❌ ${esc(t("noDiagInfo"))}</span>\n<span style="color:var(--dim)">${esc(t("noDiagHints"))}</span>`
+                 : `<span style="color:var(--faint)">${esc(t("termWaiting"))}</span>`);
+           if (p === "split") return `<div class="con-body splitp">
+             <div class="splitp-term term${pretty ? " pretty" : ""}" id="term-${a.id}">${termInner}</div>
+             <div class="splitp-map minimap" id="map-${a.id}">${renderMinimap(_aForRender)}</div>
+           </div>`;
+           if (p === "map") return `<div class="con-body minimap" id="map-${a.id}">${renderMinimap(_aForRender)}</div>`;
+           return `<div class="con-body term${pretty ? " pretty" : ""}" id="term-${a.id}">${termInner}</div>`;
+         })()}
        </div>
        ${renderSubConsoles(a)}
      </div>
@@ -1587,6 +1640,11 @@ listen("agent_done", (ev) => {
 });
 listen("agent_removed", (ev) => {
   const id = ev.payload.id; state.delete(id);
+  // detached 창에서 자신이 보던 작업이 제거되면 친화 안내(자기 자신을 닫지는 않음 — 사용자 선택)
+  if (DETACHED && id === DETACHED_ID){
+    const av = $("#agentView"); if (av) av.innerHTML = `<div class="detached-removed">⚠ ${esc(t("detachedRemoved"))}</div>`;
+    return;
+  }
   const i = openTabs.indexOf(id); if (i >= 0) openTabs.splice(i, 1);
   if (selectedId === id) selectedId = openTabs.length ? openTabs[openTabs.length - 1] : null;
   render();
