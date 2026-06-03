@@ -157,6 +157,12 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **비동기 enterApp**: `check_claude`/`get_cost_cap`/`check_api_mode`/`loadAgents`/`refreshUsage`를 `Promise.allSettled`로 병렬. 화면이 즉시 응답하고 컴포저 입력 가능. 우상단에 떠다니는 **부트 토스트**(스피너 + "준비 중…"/"이전 작업 복원 중…"). 완료 자동 숨김.
   - **detached 양방향**: 별도 창에서 보던 작업이 메인에서 `agent_removed`로 제거되면 친화 메시지 "⚠ 이 작업이 메인에서 제거되었어요. 창을 닫아도 좋아요."
   - **분할 패널 모드**: 메인 콘솔 헤더에 **⊟ 분할** 탭 추가 — 콘솔(좌)과 미니맵(우) 동시 표시. `cc_pane_<id>` localStorage 영속화. 좁은 창에서는 자동 상하 분할.
+- **Conductor 스타일 레이아웃 차용(v0.23.0)**:
+  - **우측 패널 Files/Changes/Review 탭**: 기존 Git/검증을 Conductor 트리오로 재편 + 🗺 Map · 🖥 Term. `rightTabsHtml`에 우상단 브랜치 pill(`⤴ <branch>`). cc_rightPanel `git→files`/`verify→review` 마이그레이션.
+  - **Files = 디렉터리 그룹 트리**: 변경 파일을 디렉터리별로 묶어 대문자 경로 헤더(스크린샷 스타일) + 파일 아이콘(확장자별) + ±카운트. 행 클릭 → Changes 탭으로 점프.
+  - **Changes = 인라인 diff + Approve/Comment**: 모달 대신 패널 안에서 diff 표시. `_changesCache`로 get_diff 1회 로드. Approve=커밋(저장), Comment=후속 입력칸 포커스. agent_done 시 캐시 무효화.
+  - **중앙 헤더 OPEN/RUN**: `center-head` 래퍼 — agent-tabs 우측에 OPEN 드롭다운(워크트리/IDE/미리보기) + RUN(이어하기, 후속 입력 포커스).
+  - **사이드바 PORTS 패널**: a.port 가진 작업의 포트 칩 — 클릭 시 `http://localhost:<port>` 열기. `renderPorts()`가 render()에서 호출.
 - **미니맵·작업 관리·병렬 모드 강화(v0.22.0)**:
   - **에이전트 아이콘 상태별 분기**: 실행 중(running/creating/warming)에만 path 애니메이션, done/error/stopped는 마지막 활동 노드에 고정 + "완료/실패/정지" 라벨. 라벨은 외곽선(stroke #000) + 밝은 색(#f5e8dc)로 가시성 확보. 서브에이전트는 작은 보조 배지로 마지막 노드 주변 분산 배치.
   - **미니맵 파일 클릭 → 코드 미리보기**: `read_file_preview(id, rel)` 백엔드 커맨드(worktree 경계 검증 + 256KB·400줄 컷). UI에서 파일 노드 클릭 시 활동 로그 위에 line-number 박스로 prettify 미리보기. 보안: `..`/RootDir/Prefix 거부, canonicalize 후 worktree 안 검증.

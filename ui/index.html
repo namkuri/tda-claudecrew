@@ -98,9 +98,11 @@
       <div class="ws-list" id="wsList"></div>
     </div>
 
+    <div class="ports-panel hidden" id="portsPanel"></div>
+
     <div class="side-foot">
       <button class="btn go sm" id="btnNew" data-i18n="newTask">＋ 새 작업</button>
-      <button class="chip" id="btnChangeFolder" data-i18n="changeFolder">폴더 변경</button>
+      <button class="chip" id="btnChangeFolder2" data-i18n="changeFolder">폴더 변경</button>
       <button class="btn-reopen-git hidden" id="btnReopenGit" title="Git 패널을 다시 표시">↩ Git</button>
     </div>
   </aside>
@@ -110,7 +112,10 @@
 
   <!-- 중: 에이전트 탭 + 무대 -->
   <main class="center">
-    <div class="agent-tabs" id="agentTabs"></div>
+    <div class="center-head">
+      <div class="agent-tabs" id="agentTabs"></div>
+      <div class="center-acts" id="centerActs"></div>
+    </div>
     <div class="stage">
       <section class="agent-view hidden" id="agentView"></section>
       <section class="composer" id="composerView">

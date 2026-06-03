@@ -364,6 +364,11 @@ const I18N = {
     wsSearchPh: "🔎 작업 검색…", fltAll: "전체", fltRunning: "진행", fltDone: "완료", fltError: "오류",
     verifyTab: "검증", verifyHint: "🧪 자동 검증 결과가 아직 없어요. 작업이 끝났을 때 자동으로 돌거나, 아래 버튼을 누르면 지금 검증해요.",
     verifyRun: "지금 검증 실행",
+    rpFiles: "Files", rpFilesTitle: "바뀐 파일을 디렉터리별로", rpChanges: "Changes", rpChangesTitle: "변경 내용(diff) — 승인/코멘트",
+    rpReview: "Review", rpBranchTitle: "이 작업의 브랜치 / 워크트리",
+    chApprove: "승인(저장)", chComment: "코멘트", chCommentPh: "이 변경에 대해 추가 요청…", chCommentHint: "💬 아래 입력칸에 변경 요청을 적어 보내세요.",
+    openBtn: "열기", openWt: "📂 워크트리 열기", openIde: "🧩 IDE로 열기", openPreview: "🌐 미리보기", runBtn: "이어하기",
+    portsTitle: "열린 포트", portsNone: "열린 포트 없음",
     grpActive: "▶ 진행 중", grpDone: "✓ 완료", grpIssue: "⚠ 점검 필요",
     thinkingLabel: "추론", answerLabel: "답변", expandAll: "모두 펼치기", collapseAll: "모두 접기",
     scrollDown: "↓ 새 내용 보기",
@@ -479,6 +484,11 @@ const I18N = {
     wsSearchPh: "🔎 Find a task…", fltAll: "All", fltRunning: "Active", fltDone: "Done", fltError: "Error",
     verifyTab: "Verify", verifyHint: "🧪 No auto-verify result yet. It runs when a task finishes, or click below to verify now.",
     verifyRun: "Run verify now",
+    rpFiles: "Files", rpFilesTitle: "Changed files by directory", rpChanges: "Changes", rpChangesTitle: "Diff — approve / comment",
+    rpReview: "Review", rpBranchTitle: "This task's branch / worktree",
+    chApprove: "Approve (save)", chComment: "Comment", chCommentPh: "Request a change on this diff…", chCommentHint: "💬 Type your change request in the box below.",
+    openBtn: "Open", openWt: "📂 Open worktree", openIde: "🧩 Open in IDE", openPreview: "🌐 Preview", runBtn: "Continue",
+    portsTitle: "Open ports", portsNone: "No open ports",
     grpActive: "▶ Active", grpDone: "✓ Done", grpIssue: "⚠ Needs attention",
     thinkingLabel: "Thinking", answerLabel: "Answer", expandAll: "Expand all", collapseAll: "Collapse all",
     scrollDown: "↓ Jump to latest",
@@ -551,6 +561,11 @@ I18N.ja = {
   boardTitle2: "📊 統合監視ボード", boardEmpty: "進行中のタスクはまだありません。",
   boardSummary: "{0}件 · 実行中 {1} · 完了 {2} · 確認 {3}",
   minimapTab: "ミニマップ", verifyTab: "検証",
+  rpFiles: "Files", rpFilesTitle: "変更ファイルをディレクトリ別に", rpChanges: "Changes", rpChangesTitle: "差分 — 承認/コメント",
+  rpReview: "Review", rpBranchTitle: "このタスクのブランチ / worktree",
+  chApprove: "承認(保存)", chComment: "コメント", chCommentPh: "この差分への追加リクエスト…", chCommentHint: "💬 下の入力欄に変更リクエストを入力。",
+  openBtn: "開く", openWt: "📂 worktree を開く", openIde: "🧩 IDEで開く", openPreview: "🌐 プレビュー", runBtn: "続行",
+  portsTitle: "開いているポート", portsNone: "開いているポートなし",
   tlPlay: "再生/一時停止", tlBack: "最初へ", tlLive: "ライブ",
   popout: "🪟 別ウィンドウ",
 };
@@ -709,7 +724,14 @@ const openTabs = [];            // 열린 탭(작업 id 순서)
 let authMode = localStorage.getItem("cc_authmode") || "subscription"; // subscription(앱 플랜) | api
 let pretty = localStorage.getItem("cc_pretty") === "1"; // Pretty 모드(콘솔 그룹 접힘 + Markdown)
 let gitDock = localStorage.getItem("cc_gitDock") || "right"; // right(기본) | bottom | hidden
-let rightPanel = localStorage.getItem("cc_rightPanel") || "git"; // git | minimap | verify — 우측 컨테이너 활성 탭
+// 우측 컨테이너 활성 탭 — Conductor 스타일: files | changes | review | minimap | terminal
+let rightPanel = (() => {
+  const v = localStorage.getItem("cc_rightPanel") || "files";
+  // 구버전 값 마이그레이션
+  if (v === "git") return "files";
+  if (v === "verify") return "review";
+  return v;
+})();
 let autoVerify = localStorage.getItem("cc_autoVerify") === "1"; // 작업 완료 시 자동 검증
 let baseBranch = "main"; // 저장소의 기본/기준 브랜치 — 작업 선택 시 백엔드가 검출해 채움
 
@@ -1029,6 +1051,7 @@ async function changeFolderInline(){
   } catch (e) { showToast(String(e), "err", 4000); }
 }
 document.getElementById("btnChangeFolder")?.addEventListener("click", changeFolderInline);
+document.getElementById("btnChangeFolder2")?.addEventListener("click", changeFolderInline);
 document.getElementById("repoName")?.addEventListener("click", changeFolderInline);
 document.getElementById("btnBoard")?.addEventListener("click", showMonitorBoard);
 
@@ -1780,9 +1803,63 @@ function render(){
   renderStatusStrip();
   renderSidebar();
   renderTabs();
+  renderCenterActs();
   renderStage();
   renderGit();
   renderStatusbar();
+  renderPorts();
+}
+
+// 중앙 헤더 우측 — OPEN(워크트리/IDE/미리보기) + RUN(이어하기). Conductor 스타일.
+function renderCenterActs(){
+  const host = $("#centerActs"); if (!host) return;
+  if (!(selectedId && state.has(selectedId))) { host.innerHTML = ""; return; }
+  const a = state.get(selectedId);
+  const running = ["running","creating","warming"].includes(a.status);
+  host.innerHTML =
+    `<div class="ca-open">
+       <button class="ca-btn" id="caOpenBtn">⧉ ${esc(t("openBtn"))} <span class="ca-caret">⌄</span></button>
+       <div class="ca-menu hidden" id="caMenu">
+         <button data-open="wt" ${a.worktree ? "" : "disabled"}>${esc(t("openWt"))}</button>
+         <button data-open="ide" ${a.worktree ? "" : "disabled"}>${esc(t("openIde"))}</button>
+         ${a.port ? `<button data-open="preview">${esc(t("openPreview"))}</button>` : ""}
+       </div>
+     </div>
+     <button class="ca-btn run" id="caRunBtn" ${running ? "disabled" : ""}>▶ ${esc(t("runBtn"))}</button>`;
+  const openBtn = $("#caOpenBtn"), menu = $("#caMenu");
+  if (openBtn) openBtn.onclick = (e) => { e.stopPropagation(); menu.classList.toggle("hidden");
+    if (!menu.classList.contains("hidden")) setTimeout(() => document.addEventListener("click", () => menu.classList.add("hidden"), { once: true }), 0);
+  };
+  if (menu) menu.querySelectorAll("[data-open]").forEach(b => b.onclick = () => {
+    const k = b.dataset.open; menu.classList.add("hidden");
+    if (k === "wt" && a.worktree) invoke("open_path", { path: a.worktree }).catch(e => showToast(t("opFail") + e, "err", 4000));
+    else if (k === "ide" && a.worktree) invoke("open_path", { path: a.worktree }).catch(e => showToast(t("opFail") + e, "err", 4000));
+    else if (k === "preview" && a.port) invoke("open_url", { url: "http://localhost:" + a.port }).catch(()=>{});
+  });
+  const runBtn = $("#caRunBtn");
+  if (runBtn) runBtn.onclick = () => {
+    const fu = document.getElementById("followUp-" + a.id);
+    if (fu && !fu.disabled) { fu.focus(); fu.scrollIntoView({ block: "center", behavior: "smooth" }); }
+  };
+}
+
+// 사이드바 하단 PORTS 패널 — a.port 가진 작업들
+function renderPorts(){
+  const host = $("#portsPanel"); if (!host) return;
+  const withPort = [...state.values()].filter(a => a.port);
+  if (!withPort.length) { host.innerHTML = ""; host.classList.add("hidden"); return; }
+  host.classList.remove("hidden");
+  host.innerHTML =
+    `<div class="ports-head">⇄ ${esc(t("portsTitle"))} <span class="ports-n">${withPort.length}</span></div>
+     <div class="ports-list">${withPort.map(a =>
+        `<button class="port-chip" data-port-id="${esc(a.id)}" title="${esc((a.prompt||a.branch||a.id).slice(0,40))}">
+           <span class="port-task">${esc((a.prompt||a.branch||a.id).slice(0,16))}</span>
+           <span class="port-num">:${a.port}</span>
+         </button>`).join("")}</div>`;
+  host.querySelectorAll("[data-port-id]").forEach(b => b.onclick = () => {
+    const a = state.get(b.dataset.portId);
+    if (a && a.port) invoke("open_url", { url: "http://localhost:" + a.port }).catch(()=>{});
+  });
 }
 
 function renderStatusStrip(){
@@ -2174,13 +2251,26 @@ const _dockCtrlHtml = `<div class="dock-ctrl" id="gpDockCtrl" draggable="true" t
     <button data-dock="hidden" title="숨김">✕</button>
     <button data-dock="popout" title="별도 창">🪟</button>
   </div>`;
+// 우측 패널 상단 — Conductor 스타일 탭(Files/Changes/Review/Map/Term) + 브랜치/PR pill
 function rightTabsHtml(){
-  return `<div class="rp-tabs">
-    <button class="rp-tab ${rightPanel === "git" ? "on" : ""}" data-rp="git" title="Git 변경/커밋">🌿 Git</button>
-    <button class="rp-tab ${rightPanel === "minimap" ? "on" : ""}" data-rp="minimap" title="에이전트 활동 미니맵">🗺 ${esc(t("minimapTab"))}</button>
-    <button class="rp-tab ${rightPanel === "verify" ? "on" : ""}" data-rp="verify" title="자동 검증 결과">🧪 ${esc(t("verifyTab"))}</button>
-    <button class="rp-tab ${rightPanel === "terminal" ? "on" : ""}" data-rp="terminal" title="${esc(t("termTabTitle"))}">🖥 ${esc(t("termTab"))}</button>
+  const a = (selectedId && state.has(selectedId)) ? state.get(selectedId) : null;
+  const branchPill = a ? `<span class="rp-pr" title="${esc(t("rpBranchTitle"))}">⤴ ${esc(a.branch || a.id)}</span>` : "";
+  const T = (rp, label, tip) => `<button class="rp-tab ${rightPanel === rp ? "on" : ""}" data-rp="${rp}" title="${esc(tip)}">${label}</button>`;
+  return `<div class="rp-tabbar">
+    <div class="rp-tabs">
+      ${T("files", "📁 " + esc(t("rpFiles")), t("rpFilesTitle"))}
+      ${T("changes", "🔀 " + esc(t("rpChanges")), t("rpChangesTitle"))}
+      ${T("review", "✓ " + esc(t("rpReview")), t("verifyTab"))}
+      ${T("minimap", "🗺", t("minimapTab"))}
+      ${T("terminal", "🖥", t("termTabTitle"))}
+    </div>
+    ${branchPill}
   </div>`;
+}
+function bindRightTabs(){
+  document.querySelectorAll("#gitpanel .rp-tab").forEach(b => {
+    b.onclick = () => { rightPanel = b.dataset.rp; localStorage.setItem("cc_rightPanel", rightPanel); renderGit(); };
+  });
 }
 function bindRightTabs(){
   document.querySelectorAll("#gitpanel .rp-tab").forEach(b => {
@@ -2242,7 +2332,7 @@ function renderGit(){
     setTimeout(() => mountPty("main"), 30);
     return;
   }
-  if (rightPanel === "verify"){
+  if (rightPanel === "review"){
     const a = state.get(selectedId);
     const v = a._verify;
     const body = v ? renderVerifyPanel(a)
@@ -2259,26 +2349,27 @@ function renderGit(){
     };
     return;
   }
-  // 기본: Git
-
+  if (rightPanel === "changes"){
+    const a = state.get(selectedId);
+    gp.innerHTML = _dockCtrlHtml + rightTabsHtml() + `<div class="rp-body" id="changesBody">${renderChangesView(a)}</div>`;
+    bindGitDock(); bindRightTabs();
+    bindChangesView(a);
+    return;
+  }
+  // 기본: Files — 디렉터리 그룹 트리 + worktree + 커밋
   const a = state.get(selectedId); const st = a._stat;
-  const filesHtml = st && st.files && st.files.length
-    ? st.files.map(f => `<div class="gp-file" data-fdiff="1"><span class="fn">${esc(f.name)}</span><span class="fst"><span class="gp-add">+${f.adds}</span><span class="gp-del">-${f.dels}</span></span></div>`).join("")
-    : `<div class="gp-empty" style="padding:4px 6px">${t("gpNoChange")}</div>`;
   gp.innerHTML = _dockCtrlHtml + rightTabsHtml() +
-    `<div class="gp-head">${t("gpBase")}: <b>${esc(baseBranch)}</b> · #${shortId(a.id)}</div>
-     <div class="gp-sec">
-       <h4 title="${esc(t("wtTitle"))}">${t("wtPath")}</h4>
-       <div class="gp-wt"><code class="gp-wtpath" title="${esc(a.worktree || "")}">${esc(a.worktree || "")}</code>
-         <button class="linkbtn" id="gpOpenWt" ${a.worktree ? "" : "disabled"}>${t("wtOpen")}</button></div>
-     </div>
-     <div class="gp-commit">
-       <textarea id="gpMsg" placeholder="${esc(t("gpCommitPh"))}"></textarea>
-       <button class="btn go" id="gpCommitBtn">✓ ${t("gpCommit")}</button>
-     </div>
-     <div class="gp-sec">
-       <h4>${t("gpAgainst")}<span class="n">${st ? st.files.length : 0}</span></h4>
-       ${filesHtml}
+    `<div class="rp-body">
+       <div class="gp-head">${t("gpBase")}: <b>${esc(baseBranch)}</b> · #${shortId(a.id)}</div>
+       <div class="gp-sec gp-wt-sec">
+         <div class="gp-wt"><code class="gp-wtpath" title="${esc(a.worktree || "")}">${esc(a.worktree || "")}</code>
+           <button class="linkbtn" id="gpOpenWt" ${a.worktree ? "" : "disabled"}>${t("wtOpen")}</button></div>
+       </div>
+       <div class="gp-files-tree">${renderFilesTree(st)}</div>
+       <div class="gp-commit">
+         <textarea id="gpMsg" placeholder="${esc(t("gpCommitPh"))}"></textarea>
+         <button class="btn go" id="gpCommitBtn">✓ ${t("gpCommit")}</button>
+       </div>
      </div>`;
   const wtBtn = $("#gpOpenWt"); if (wtBtn) wtBtn.onclick = () => { if (a.worktree) invoke("open_path", { path: a.worktree }).catch(e => alert(t("opFail") + e)); };
   $("#gpCommitBtn").onclick = async () => {
@@ -2286,8 +2377,112 @@ function renderGit(){
     try { const res = await invoke("commit_agent", { id: a.id, message: msg || "" }); showHint(typeof res === "string" ? res : t("status_committed")); a._stat = null; loadAgents(); }
     catch (e) { alert(t("saveFail") + e); }
   };
-  gp.querySelectorAll('[data-fdiff]').forEach(el => el.onclick = () => viewDiff(a.id));
+  // 파일 행 클릭 → Changes 탭으로 이동 + 해당 파일 펼침
+  gp.querySelectorAll('[data-file]').forEach(el => el.onclick = () => {
+    _changesFocusFile = el.dataset.file;
+    rightPanel = "changes"; localStorage.setItem("cc_rightPanel", rightPanel); renderGit();
+  });
   bindGitDock(); bindRightTabs();
+}
+
+// Files 탭 — 변경 파일을 디렉터리별로 그룹핑(스크린샷의 대문자 경로 헤더 스타일)
+function renderFilesTree(st){
+  if (!st || !st.files || !st.files.length) return `<div class="gp-empty" style="padding:14px 6px">${t("gpNoChange")}</div>`;
+  // dir → [files]
+  const groups = {};
+  st.files.forEach(f => {
+    const parts = f.name.split("/");
+    const dir = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+    const base = parts[parts.length - 1];
+    (groups[dir] = groups[dir] || []).push({ ...f, base });
+  });
+  const dirs = Object.keys(groups).sort();
+  const fileIcon = (name) => {
+    const ext = (name.match(/\.([a-z0-9]+)$/i) || [,""])[1].toLowerCase();
+    if (["ts","tsx","js","jsx","mjs"].includes(ext)) return "🟨";
+    if (["rs"].includes(ext)) return "🦀";
+    if (["css","scss"].includes(ext)) return "🎨";
+    if (["html","htm"].includes(ext)) return "🌐";
+    if (["json","toml","yml","yaml"].includes(ext)) return "⚙️";
+    if (["md","txt"].includes(ext)) return "📄";
+    return "📄";
+  };
+  return dirs.map(dir => {
+    const rows = groups[dir].map(f => `
+      <div class="gp-ftree-row" data-file="${esc(f.name)}" title="${esc(f.name)}">
+        <span class="ft-ic">${fileIcon(f.base)}</span>
+        <span class="ft-name">${esc(f.base)}</span>
+        <span class="ft-stat"><span class="gp-add">+${f.adds}</span><span class="gp-del">-${f.dels}</span></span>
+      </div>`).join("");
+    return `<div class="gp-ftree-group">
+      <div class="gp-ftree-dir">${esc(dir || "/")}</div>
+      ${rows}
+    </div>`;
+  }).join("");
+}
+
+// Changes 탭 — 인라인 diff + Approve/Comment(스크린샷)
+let _changesFocusFile = null;
+let _changesCache = {};
+function renderChangesView(a){
+  const cached = _changesCache[a.id];
+  if (!cached) {
+    // 비동기 로드 — 일단 로딩 표시
+    return `<div class="ch-loading">${esc(t("diffLoading"))}</div>`;
+  }
+  if (cached.error) return `<div class="mm-prev-err">${esc(cached.error)}</div>`;
+  const files = cached.files;
+  if (!files.length) return `<div class="gp-empty" style="padding:20px">${t("gpNoChange")}</div>`;
+  const totalAdd = files.reduce((s,f)=>s+f.adds,0), totalDel = files.reduce((s,f)=>s+f.dels,0);
+  const filesHtml = files.map((f, i) => {
+    const open = (_changesFocusFile && f.name === _changesFocusFile) || (!_changesFocusFile && i === 0);
+    return `<div class="ch-file">
+      <div class="ch-file-h" data-chi="${i}">
+        <span class="caret">${open ? "▾" : "▸"}</span>
+        <span class="ch-fname">${esc(f.name)}</span>
+        <span class="ch-fcount"><span class="gp-add">+${f.adds}</span> <span class="gp-del">-${f.dels}</span></span>
+      </div>
+      <pre class="ch-file-b ${open ? "" : "hidden"}" id="chb-${i}">${f.body.split("\n").map(renderDiffLine).join("\n")}</pre>
+    </div>`;
+  }).join("");
+  return `<div class="ch-summary">${t("diffSummary", files.length, totalAdd, totalDel)}</div>
+    <div class="ch-files">${filesHtml}</div>
+    <div class="ch-acts">
+      <button class="btn go" data-act="approve">✓ ${esc(t("chApprove"))}</button>
+      <button class="btn" data-act="comment">💬 ${esc(t("chComment"))}</button>
+    </div>`;
+}
+async function bindChangesView(a){
+  // 캐시 없으면 로드 후 재렌더
+  if (!_changesCache[a.id]) {
+    try {
+      const diff = await invoke("get_diff", { id: a.id });
+      if (!diff || diff.trim() === "(바뀐 점 없음)") _changesCache[a.id] = { files: [] };
+      else _changesCache[a.id] = { files: parseDiff(diff) };
+    } catch (e) { _changesCache[a.id] = { error: String(e) }; }
+    if (rightPanel === "changes" && selectedId === a.id) { renderGit(); }
+    return;
+  }
+  const body = document.getElementById("changesBody");
+  if (!body) return;
+  // 파일 헤더 토글
+  body.querySelectorAll(".ch-file-h").forEach(h => h.onclick = () => {
+    const b = document.getElementById("chb-" + h.dataset.chi);
+    const hidden = b.classList.toggle("hidden");
+    h.querySelector(".caret").textContent = hidden ? "▸" : "▾";
+  });
+  // Approve = 커밋(적용), Comment = 후속 프롬프트로
+  const approve = body.querySelector('[data-act="approve"]');
+  if (approve) approve.onclick = async () => {
+    try { const res = await invoke("commit_agent", { id: a.id, message: "" }); showHint(typeof res === "string" ? res : t("status_committed")); a._stat = null; _changesCache[a.id] = null; loadAgents(); }
+    catch (e) { showToast(t("saveFail") + e, "err", 4000); }
+  };
+  const comment = body.querySelector('[data-act="comment"]');
+  if (comment) comment.onclick = () => {
+    const fu = document.getElementById("followUp-" + a.id);
+    if (fu) { fu.focus(); fu.placeholder = t("chCommentPh"); }
+    showToast(t("chCommentHint"), "info", 3500);
+  };
 }
 
 // 사이드바/탭 클릭(이벤트 위임) + 새 작업
@@ -2420,6 +2615,7 @@ listen("agent_done", (ev) => {
   const a = ev.payload; const cur = state.get(a.id) || {};
   const merged = { ...cur, ...a, output: cur.output || [], _stat: null };
   state.set(a.id, merged);
+  if (_changesCache) _changesCache[a.id] = null; // diff 캐시 무효화 — 완료 후 새 변경 반영
   addWeekly(a.id, (merged.tokens_in || 0) + (merged.tokens_out || 0));
   render();
   // 자동 검증 — 사용자가 토글했을 때, 성공 종료(done)이면 verify_changes 자동 실행
