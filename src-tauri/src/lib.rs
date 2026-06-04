@@ -33,6 +33,8 @@ struct AgentInfo {
     #[serde(default)] role: Option<String>,
     #[serde(default)] output: Vec<String>,   // 누적 터미널 로그(디스크 영속화)
     #[serde(default)] started_at: Option<i64>, // 작업 시작(ms epoch) — 헤더 경과시간 표시용
+    #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, // 병렬 분할 워커의 부모 작업
+    #[serde(default, skip_serializing_if = "Option::is_none")] subtask_title: Option<String>, // 병렬 분할 시 이 워커가 맡은 조각 제목
 }
 
 // PTY 세션: label 별로 stdin writer + child handle 보관.
@@ -809,6 +811,8 @@ fn create_agent(
         output: vec![],
         started_at: Some(std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)),
+        parent_id: None,
+        subtask_title: None,
     };
     state.agents.lock().unwrap().insert(id.clone(), info.clone());
     let _ = app.emit("agent_update", info);
@@ -853,6 +857,159 @@ code-reviewer(읽기전용 리뷰), plan(계획 형식화), security(읽기전�
     });
 
     Ok(id)
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64).unwrap_or(0)
+}
+
+// 동기 캡처 호출 — plan 모드로 '텍스트만' 받아온다(파일 수정 없음). 작업 분해/요약 같은 짧은 작업용.
+fn run_claude_capture(repo: &str, prompt: &str, model: &str, use_subscription: bool) -> Option<String> {
+    let args: Vec<String> = vec![
+        "-p".into(),
+        "--input-format".into(), "text".into(),
+        "--output-format".into(), "text".into(),
+        "--model".into(), model.to_string(),
+        "--permission-mode".into(), "plan".into(),
+    ];
+    let mut cmd = claude_command(&args);
+    cmd.current_dir(repo)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if use_subscription {
+        cmd.env_remove("ANTHROPIC_API_KEY");
+        cmd.env_remove("ANTHROPIC_AUTH_TOKEN");
+    }
+    let mut child = cmd.spawn().ok()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(prompt.as_bytes());
+        // drop으로 EOF
+    }
+    let out = child.wait_with_output().ok()?;
+    let s = String::from_utf8_lossy(&out.stdout).to_string();
+    if s.trim().is_empty() { None } else { Some(s) }
+}
+
+// 캡처된 텍스트에서 [{title, prompt}, ...] JSON 배열을 추출한다(앞뒤 설명이 섞여도 첫 '['~마지막 ']' 사이를 시도).
+fn extract_subtasks(text: &str) -> Vec<(String, String)> {
+    let (Some(s), Some(e)) = (text.find('['), text.rfind(']')) else { return vec![] };
+    if e <= s { return vec![]; }
+    let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(&text[s..=e]) else { return vec![] };
+    let mut out = vec![];
+    for item in arr {
+        let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        let p = item.get("prompt").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        if !p.is_empty() { out.push((title, p)); }
+    }
+    out
+}
+
+// 워커 하나를 독립 프로세스(자기 worktree)로 띄운다. parent_id로 부모와 연결.
+#[allow(clippy::too_many_arguments)]
+fn spawn_worker(app: &AppHandle, repo: String, base_num: &str, n: usize, title: String,
+                subtask_prompt: String, model: String, permission: String,
+                use_subscription: bool, parent_id: String) -> String {
+    // 워커마다 다른 전문가 아이콘을 부여(시각 구분용 — 동작엔 영향 없음)
+    const ROLES: [&str; 6] = ["implementer", "debugger", "librarian", "oracle", "code-reviewer", "plan"];
+    let id = {
+        let state = app.state::<AppState>();
+        let mut c = state.counter.lock().unwrap();
+        *c += 1;
+        format!("a{}", *c)
+    };
+    let branch = sanitize(&format!("task-{base_num}-{}", n + 1));
+    let worktree = PathBuf::from(&repo).join(".agentboard").join(&branch).to_string_lossy().to_string();
+    let display: String = if title.is_empty() { subtask_prompt.chars().take(40).collect() } else { title.clone() };
+    let info = AgentInfo {
+        id: id.clone(), repo: repo.clone(), branch: branch.clone(),
+        prompt: display.clone(), model: model.clone(), permission: permission.clone(),
+        worktree: worktree.clone(), status: "creating".into(),
+        cost: None, pid: None, port: None, tokens_in: None, tokens_out: None, ctx: None,
+        session_id: None, role: Some(ROLES[n % ROLES.len()].to_string()), output: vec![],
+        started_at: Some(now_ms()),
+        parent_id: Some(parent_id.clone()), subtask_title: Some(display.clone()),
+    };
+    app.state::<AppState>().agents.lock().unwrap().insert(id.clone(), info.clone());
+    let _ = app.emit("agent_update", info);
+    let eff = format!(
+        "{subtask_prompt}\n\n— 이 조각만 끝까지 처리하세요. 다른 조각은 다른 워커가 병렬로 진행하니 범위를 넘지 마세요. \
+끝나면 무엇을 했는지 한국어로 짧게 요약하세요."
+    );
+    let app2 = app.clone();
+    let id2 = id.clone();
+    std::thread::spawn(move || {
+        run_agent(app2, id2, repo, eff, model, permission, branch, worktree, false, use_subscription, None);
+    });
+    id
+}
+
+// 🚀 진짜 병렬 — 오케스트레이터가 작업을 독립 조각으로 분해(plan 캡처) → 각 조각을 별도 프로세스+worktree 워커로 띄운다.
+// 각 워커는 완전한 stream-json을 내므로 UI에서 실제 활동·미니맵·상태를 개별 추적할 수 있다.
+#[tauri::command]
+fn spawn_parallel(app: AppHandle, repo: String, prompt: String, model: String,
+                  permission: String, authmode: Option<String>) -> Result<String, String> {
+    if !PathBuf::from(&repo).join(".git").exists() {
+        return Err(format!("선택한 폴더가 git 프로젝트가 아닙니다: {repo}"));
+    }
+    let use_subscription = authmode.as_deref() != Some("api");
+    let parent_id = {
+        let state = app.state::<AppState>();
+        let mut c = state.counter.lock().unwrap();
+        *c += 1;
+        format!("a{}", *c)
+    };
+    let parent_num: String = parent_id.chars().filter(|c| c.is_ascii_digit()).collect();
+    let parent = AgentInfo {
+        id: parent_id.clone(), repo: repo.clone(), branch: format!("parallel-{parent_num}"),
+        prompt: prompt.clone(), model: model.clone(), permission: permission.clone(),
+        worktree: String::new(), status: "creating".into(),
+        cost: None, pid: None, port: None, tokens_in: None, tokens_out: None, ctx: None,
+        session_id: None, role: Some("orchestrator".into()), output: vec![],
+        started_at: Some(now_ms()), parent_id: None, subtask_title: Some("분해 중…".into()),
+    };
+    app.state::<AppState>().agents.lock().unwrap().insert(parent_id.clone(), parent.clone());
+    let _ = app.emit("agent_update", parent);
+
+    let app2 = app.clone();
+    let parent_id2 = parent_id.clone();
+    std::thread::spawn(move || {
+        emit_output(&app2, &parent_id2, "🧩 작업을 독립 조각으로 분해하는 중…");
+        let plan_prompt = format!(
+            "아래 요청을 서로 파일 충돌 없이 병렬 실행 가능한 2~6개의 독립 작업으로 나눠라.\n\
+출력은 **JSON 배열만**(설명·코드펜스 금지): [{{\"title\":\"짧은 제목\",\"prompt\":\"그 조각만의 구체 지시\"}}]\n\
+분할이 무의미하면 한 개짜리 배열로 답하라.\n\n요청:\n{prompt}"
+        );
+        let text = run_claude_capture(&repo, &plan_prompt, &model, use_subscription);
+        let mut subs = text.as_deref().map(extract_subtasks).unwrap_or_default();
+        if subs.is_empty() {
+            subs.push((String::new(), prompt.clone()));
+            emit_output(&app2, &parent_id2, "⚠ 자동 분해 실패 — 단일 워커로 진행합니다.");
+        } else {
+            emit_output(&app2, &parent_id2, &format!("✅ {}개 조각으로 분해 — 각자 독립 프로세스로 실행합니다.", subs.len()));
+        }
+        let mut n_workers = 0usize;
+        for (i, (title, sp)) in subs.iter().enumerate() {
+            let label: String = if title.is_empty() { sp.chars().take(40).collect() } else { title.clone() };
+            emit_output(&app2, &parent_id2, &format!("  → 워커 #{}: {}", i + 1, label));
+            spawn_worker(&app2, repo.clone(), &parent_num, i, title.clone(), sp.clone(),
+                         model.clone(), permission.clone(), use_subscription, parent_id2.clone());
+            n_workers += 1;
+        }
+        // 부모는 '조정자' — 분해를 마쳤으니 done(워커들이 실제 작업 수행). subtask_title로 요약 표시.
+        {
+            let state = app2.state::<AppState>();
+            let mut map = state.agents.lock().unwrap();
+            if let Some(a) = map.get_mut(&parent_id2) {
+                a.status = "done".into();
+                a.subtask_title = Some(format!("{n_workers}개 워커 분기"));
+                let _ = app2.emit("agent_update", a.clone());
+                save_agent_state(a);
+            }
+        }
+    });
+    Ok(parent_id)
 }
 
 fn set_status(app: &AppHandle, id: &str, status: &str) {
@@ -1669,6 +1826,8 @@ fn restore_agents(app: AppHandle, repo: String) -> Vec<AgentInfo> {
                         role: None,
                         output: vec![],
                         started_at: None,
+                        parent_id: None,
+                        subtask_title: None,
                     });
                 state.agents.lock().unwrap().insert(id, info);
             }
@@ -2125,7 +2284,8 @@ pub fn run() {
             pty_write,
             pty_resize,
             pty_close,
-            read_file_preview
+            read_file_preview,
+            spawn_parallel
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

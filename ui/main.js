@@ -99,10 +99,25 @@ function layoutSvgTree(root){
 }
 
 // 마지막 N개의 활동 인덱스를 강조(애니메이션 가능). agentRole 도 함께 표시 가능.
+// 작업의 output에서 마지막 의미있는 활동 한 줄(파일/도구) 추출 — 워커 말풍선용
+function lastActivityLine(ag){
+  const out = ag.output || [];
+  for (let i = out.length - 1; i >= 0; i--){
+    const line = (out[i] || "").trim();
+    if (!line) continue;
+    if (/^[🔧✏️📄📁🔍💻🧑‍💼📖🌿]/.test(line) || /\b(Read|Write|Edit|Bash|Glob|Grep)\b/.test(line)) return line.slice(0, 60);
+  }
+  // 마지막 비어있지 않은 줄
+  for (let i = out.length - 1; i >= 0; i--){ const l = (out[i]||"").trim(); if (l && !l.startsWith("$ claude") && !l.startsWith("📚")) return l.slice(0, 60); }
+  return "";
+}
+
 function renderMinimap(a, opts){
   opts = opts || {};
   const acts = extractActivities(a.output || []);
-  if (acts.length === 0) return `<div class="mm-empty">${esc(t("minimapEmpty"))}</div>`;
+  // 병렬 워커(자식 작업) — 부모 코디네이터를 볼 때 실제 워커들을 로스터에 표시
+  const children = [...state.values()].filter(x => x.parent_id === a.id);
+  if (acts.length === 0 && children.length === 0) return `<div class="mm-empty">${esc(t("minimapEmpty"))}</div>`;
   const tree = buildFileTree(acts);
   // SVG 트리
   const layout = layoutSvgTree(tree);
@@ -151,26 +166,39 @@ function renderMinimap(a, opts){
       const base = (last.target || "").split(/[\\/]/).filter(Boolean).pop() || last.target || "";
       return `${activityIcon(last.kind)} ${base}`.trim();
     })();
-    items.push({ key: "__lead", role: a.role || "orchestrator", status: a.status, primary: true, speech: leadSpeech });
-    // 팀원들(서브에이전트) — tuid 키로 각자 구분
-    const tm = a.teammates || {};
-    for (const k of Object.keys(tm)) {
-      const m = mate(tm, k);
-      const nm = m.name || k;
-      const speech = (m.status === "done") ? (m.result ? m.result.slice(0, 70) : t("sub_done"))
-                   : (m.status === "error") ? (m.result || t("sub_failed"))
-                   : (m.desc || m.prompt || t("sub_working"));
-      items.push({ key: k, role: nm, status: m.status, speech });
+    const leadName = children.length ? (lang === "en" ? "Coordinator" : (lang === "ja" ? "コーディネーター" : "조정자")) : null;
+    items.push({ key: "__lead", role: a.role || "orchestrator", status: a.status, primary: true, speech: leadSpeech, nameOverride: leadName });
+    if (children.length) {
+      // 진짜 병렬 — 각 워커는 독립 프로세스. 실제 status + 실제 마지막 활동을 말풍선에.
+      children.forEach(w => {
+        const speech = (w.status === "done") ? (lastActivityLine(w) || t("sub_done"))
+                     : (w.status === "error") ? (t("sub_failed"))
+                     : (lastActivityLine(w) || w.subtask_title || t("sub_working"));
+        items.push({ key: w.id, role: w.role || "implementer", status: w.status, speech,
+                     nameOverride: w.subtask_title || w.prompt, childId: w.id });
+      });
+    } else {
+      // 단일 프로세스 내 서브에이전트(Task) — tuid 키로 각자 구분(내부 활동은 SDK 미노출)
+      const tm = a.teammates || {};
+      for (const k of Object.keys(tm)) {
+        const m = mate(tm, k);
+        const nm = m.name || k;
+        const speech = (m.status === "done") ? (m.result ? m.result.slice(0, 70) : t("sub_done"))
+                     : (m.status === "error") ? (m.result || t("sub_failed"))
+                     : (m.desc || m.prompt || t("sub_working"));
+        items.push({ key: k, role: nm, status: m.status, speech });
+      }
     }
     const cards = items.map(ag => {
       const b = badgeOf(ag.role);
       const live = (ag.status === "working") || ["running","creating","warming"].includes(ag.status);
       const stCls = live ? "working" : (ag.status === "error" ? "error" : (ag.status === "done" ? "done" : "rest"));
-      const nm = lang === "en" ? b.en : b.ko;
-      return `<div class="mm-ag-card ${stCls} ${ag.primary ? "lead" : ""}">
+      const nm = ag.nameOverride ? ag.nameOverride : (lang === "en" ? b.en : b.ko);
+      const clickAttr = ag.childId ? ` data-mm-child="${esc(ag.childId)}" role="button" tabindex="0"` : "";
+      return `<div class="mm-ag-card ${stCls} ${ag.primary ? "lead" : ""} ${ag.childId ? "clickable" : ""}"${clickAttr}>
         <div class="mm-ag-ava"><span class="mm-ag-ic">${b.icon}</span><span class="mm-ag-dot ${stCls}"></span></div>
         <div class="mm-ag-body">
-          <div class="mm-ag-name">${esc(nm)}${ag.primary ? ` <span class="mm-ag-tag">${esc(t("mmLead"))}</span>` : ""}</div>
+          <div class="mm-ag-name">${esc(nm)}${ag.primary ? ` <span class="mm-ag-tag">${esc(t("mmLead"))}</span>` : ""}${ag.childId ? ` <span class="mm-ag-open">↗</span>` : ""}</div>
           <div class="mm-ag-bubble" title="${esc(ag.speech || "")}">${esc(ag.speech || "")}</div>
         </div>
       </div>`;
@@ -644,6 +672,41 @@ function makeDemoApi(){
     setTimeout(() => { a.status = "done"; a.cost = 0.0123; a.ctx = 42800; a.tokens_in = 42800; a.tokens_out = 9100; a.session_id = "demo-sess-"+n; emit("agent_done", { ...a }); }, 1700 + sample.length * 600 + 400);
     return Promise.resolve(id);
   }
+  // 데모: 병렬 분해 → 부모 + 3 워커(각자 독립 진행)
+  function demoSpawnParallel(args){
+    const ko = lang === "ko";
+    const pid = "demo" + (++n);
+    const parent = { id: pid, branch: "parallel-" + n, prompt: args.prompt || "병렬 작업",
+                     model: args.model || "sonnet", permission: args.permission || "acceptEdits",
+                     worktree: "", role: "orchestrator", status: "creating", cost: null,
+                     output: [], started_at: Date.now(), subtask_title: "분해 중…" };
+    agents[pid] = parent; emit("agent_update", { ...parent });
+    setTimeout(() => emit("agent_output", { id: pid, text: "🧩 작업을 독립 조각으로 분해하는 중…" }), 300);
+    const subs = ko
+      ? [["로그인 UI", "로그인 폼 컴포넌트와 버튼 상태를 고친다"],
+         ["인증 API", "세션 토큰 검증 로직을 수정한다"],
+         ["테스트", "로그인 회귀 테스트를 추가한다"]]
+      : [["Login UI", "Fix login form component and button state"],
+         ["Auth API", "Fix session token validation"],
+         ["Tests", "Add login regression tests"]];
+    const files = [["src/ui/Login.tsx","src/ui/Button.tsx"],["src/api/session.ts"],["tests/login.spec.ts"]];
+    setTimeout(() => emit("agent_output", { id: pid, text: `✅ ${subs.length}개 조각으로 분해 — 각자 독립 프로세스로 실행합니다.` }), 1000);
+    const roles = ["implementer","debugger","librarian"];
+    subs.forEach(([title, sp], i) => {
+      const wid = "demo" + (++n);
+      const w = { id: wid, branch: `parallel-${n}-${i+1}`, prompt: title, model: args.model || "sonnet",
+                  permission: "acceptEdits", worktree: "/demo/.agentboard/w" + wid, role: roles[i],
+                  status: "creating", cost: null, output: [], started_at: Date.now(),
+                  parent_id: pid, subtask_title: title };
+      setTimeout(() => { agents[wid] = w; emit("agent_update", { ...w }); }, 1300 + i * 250);
+      setTimeout(() => { w.status = "running"; emit("agent_update", { ...w });
+        files[i].forEach((f, j) => setTimeout(() => emit("agent_output", { id: wid, text: `🔧 Edit  ✏️ ${f}` }), j * 500));
+      }, 1700 + i * 250);
+      setTimeout(() => { w.status = "done"; w.cost = 0.004; w.ctx = 12000 + i*3000; w.tokens_in = 12000; w.tokens_out = 1800; w.session_id = "demo-w-"+wid; emit("agent_done", { ...w }); }, 4200 + i * 700);
+    });
+    setTimeout(() => { parent.status = "done"; parent.subtask_title = subs.length + "개 워커 분기"; emit("agent_update", { ...parent }); emit("agent_done", { ...parent }); }, 1900);
+    return Promise.resolve(pid);
+  }
   const invoke = (cmd, args = {}) => {
     switch (cmd){
       case "read_usage":        // 데모: stats-cache 없음 표시(데스크톱에서는 진짜 파일을 읽음)
@@ -697,6 +760,7 @@ function makeDemoApi(){
       case "stop_agent":        if (agents[args.id]) { agents[args.id].status = "stopped"; emit("agent_update", { ...agents[args.id] }); } return Promise.resolve();
       case "cleanup_agent":     emit("agent_removed", { id: args.id }); return Promise.resolve();
       case "create_agent":      return demoRun(args);
+      case "spawn_parallel":    return demoSpawnParallel(args);
       default:                  return Promise.resolve(null);
     }
   };
@@ -1422,8 +1486,8 @@ $("#rfDelete").addEventListener("click", () => {
 
 $("#btnRun").addEventListener("click", async () => {
   const promptText = $("#prompt").value.trim();
-  if (!repoPath) { alert(t("needFolder")); return; }
-  if (!promptText) { alert(t("needPrompt")); return; }
+  if (!repoPath) { showToast(t("needFolder"), "warn", 4000); return; }
+  if (!promptText) { showToast(t("needPrompt"), "warn", 4000); return; }
   const model = $("#speed").value;
   const recipePerm = $("#prompt").dataset.perm;
   const safety = $("#safety").value;
@@ -1433,9 +1497,14 @@ $("#btnRun").addEventListener("click", async () => {
   const team = $("#tglTeam").checked;
   const parallel = $("#tglParallel")?.checked || false;
   try {
-    await invoke("create_agent", { repo: repoPath, prompt: promptText, model, permission, branch: null, agent, keepgoing, team, authmode: authMode, parallel });
+    if (parallel) {
+      // 진짜 병렬 — 오케스트레이터가 분해 → 독립 워커 프로세스들로 띄움
+      await invoke("spawn_parallel", { repo: repoPath, prompt: promptText, model, permission, authmode: authMode });
+    } else {
+      await invoke("create_agent", { repo: repoPath, prompt: promptText, model, permission, branch: null, agent, keepgoing, team, authmode: authMode, parallel: false });
+    }
     $("#prompt").value = ""; delete $("#prompt").dataset.perm; delete $("#prompt").dataset.agent;
-  } catch (e) { alert(t("runFail") + e); }
+  } catch (e) { showToast(t("runFail") + e, "err", 6000); }
 });
 
 async function loadAgents(){
@@ -1924,18 +1993,30 @@ function renderSidebar(){
     });
     return;
   }
+  // 비그룹: 워커는 부모 바로 뒤에 오도록 정렬(부모-자식 인접)
+  buckets.active.sort((x, y) => {
+    const kx = x.parent_id || x.id, ky = y.parent_id || y.id;
+    if (kx === ky) return (x.parent_id ? 1 : 0) - (y.parent_id ? 1 : 0); // 부모 먼저
+    return String(kx).localeCompare(String(ky), undefined, { numeric: true });
+  });
   buckets.active.forEach(a => list.appendChild(makeWsRow(a)));
 }
 function makeWsRow(a){
   ensureStat(a.id);
   const st = a._stat || { adds: 0, dels: 0 };
+  const isWorker = !!a.parent_id;
+  const childCount = [...state.values()].filter(x => x.parent_id === a.id).length;
   const row = document.createElement("div");
-  row.className = "ws-item" + (a.id === selectedId ? " active" : "");
+  row.className = "ws-item" + (a.id === selectedId ? " active" : "") + (isWorker ? " ws-worker" : "");
   row.dataset.id = a.id;
   row.title = `${roleLabel(a)} · ${a.worktree || ""}`;
+  const connector = isWorker ? `<span class="ws-conn">└</span>` : "";
+  const groupBadge = childCount ? `<span class="ws-group-badge" title="병렬 워커 ${childCount}개">⑂${childCount}</span>` : "";
   row.innerHTML =
+    connector +
     `<span class="ws-st ${a.status}" title="${t("status_" + a.status) || a.status}"></span>` +
     `<span class="ws-name">${esc((a.prompt || a.branch || a.id).trim() || a.id)}</span>` +
+    groupBadge +
     `<span class="ws-branch">${esc(a.branch || "")}</span>` +
     `<span class="ws-stat"><span class="gp-add">+${st.adds}</span><span class="gp-del">-${st.dels}</span></span>` +
     `<span class="ws-id">#${shortId(a.id)}</span>` +
@@ -2495,6 +2576,12 @@ $("#agentTabs").addEventListener("click", (e) => {
   const tab = e.target.closest(".atab"); if (tab && tab.dataset.id) selectAgent(tab.dataset.id);
 });
 $("#btnNew").addEventListener("click", () => showComposer({ reset: true }));
+
+// 미니맵 로스터의 워커 카드 클릭 → 해당 워커(자식 작업) 열기 (어느 위치에 렌더되든 위임으로 처리)
+document.addEventListener("click", (e) => {
+  const card = e.target.closest(".mm-ag-card[data-mm-child]");
+  if (card && state.has(card.dataset.mmChild)) selectAgent(card.dataset.mmChild);
+});
 
 // ---------- 적용하기(변경 저장) ----------
 async function applyChanges(id){

@@ -157,6 +157,13 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **비동기 enterApp**: `check_claude`/`get_cost_cap`/`check_api_mode`/`loadAgents`/`refreshUsage`를 `Promise.allSettled`로 병렬. 화면이 즉시 응답하고 컴포저 입력 가능. 우상단에 떠다니는 **부트 토스트**(스피너 + "준비 중…"/"이전 작업 복원 중…"). 완료 자동 숨김.
   - **detached 양방향**: 별도 창에서 보던 작업이 메인에서 `agent_removed`로 제거되면 친화 메시지 "⚠ 이 작업이 메인에서 제거되었어요. 창을 닫아도 좋아요."
   - **분할 패널 모드**: 메인 콘솔 헤더에 **⊟ 분할** 탭 추가 — 콘솔(좌)과 미니맵(우) 동시 표시. `cc_pane_<id>` localStorage 영속화. 좁은 창에서는 자동 상하 분할.
+- **진짜 병렬 멀티프로세스 + 워커 실시간 가시성(v0.25.0)**:
+  - **배경(Agent View 문서)**: Claude 자체 Agent View도 *"서브에이전트·팀원은 별도 행으로 나열 안 됨"* — 단일 `claude -p` 내부 Task 위임으로는 팀원 활동을 못 가져옴. 그래서 각 전문가를 **독립 프로세스**로 띄우는 방식으로 전환.
+  - **`spawn_parallel` 커맨드**: 오케스트레이터가 `run_claude_capture`(plan 모드)로 작업을 JSON 분해 → 각 조각을 `spawn_worker`로 **독립 `claude -p` + 자기 worktree**에 띄움. `extract_subtasks`가 `[{title,prompt}]` 파싱(실패 시 단일 워커 폴백). 각 워커는 완전한 stream-json → 개별 활동·미니맵·상태.
+  - **AgentInfo.parent_id / subtask_title**: 워커가 부모(코디네이터)와 연결. 부모는 분해만 하고 done.
+  - **UI 부모-워커 그룹**: 사이드바 워커 들여쓰기(`ws-worker` + `└`), 부모에 `⑂N` 배지. 미니맵 로스터가 **실제 워커**(자식 작업)의 실시간 status + 마지막 편집 파일을 말풍선에 표시, `↗`로 워커 열기.
+  - **병렬 토글 동작 변경**: 🚀 병렬 분할 ON → `create_agent` 대신 `spawn_parallel` 호출.
+  - **네이티브 alert 제거**: btnRun 에러를 `showToast`로(메모리 규칙 준수 + 프리뷰 메인스레드 차단 버그 해소).
 - **미니맵 에이전트 로스터·말풍선 + 텔레포트 수정(v0.24.0)**:
   - **팀장 텔레포트 제거**: 기존 SMIL `animateTransform` 무한루프(최근 12좌표 순회)가 아이콘을 난리치게 함 → 제거. 팀장 마커는 마지막 활동 노드에 '정착', 새 활동이 오면 re-render로 자연히 이동.
   - **tuid 키잉(백엔드)**: `process_teammates`가 working/done emit에 `tuid`(Task tool_use id) 포함. 프론트는 `tuid||name`으로 키잉 → 같은 전문가 타입 여러 명도 개별 카드로 구분(기존엔 name 충돌로 1개로 합쳐짐). 표시용 `m.name` 별도 저장.
