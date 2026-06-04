@@ -157,6 +157,11 @@ ui/ (정적 HTML, window.__TAURI__ 글로벌 API)
   - **비동기 enterApp**: `check_claude`/`get_cost_cap`/`check_api_mode`/`loadAgents`/`refreshUsage`를 `Promise.allSettled`로 병렬. 화면이 즉시 응답하고 컴포저 입력 가능. 우상단에 떠다니는 **부트 토스트**(스피너 + "준비 중…"/"이전 작업 복원 중…"). 완료 자동 숨김.
   - **detached 양방향**: 별도 창에서 보던 작업이 메인에서 `agent_removed`로 제거되면 친화 메시지 "⚠ 이 작업이 메인에서 제거되었어요. 창을 닫아도 좋아요."
   - **분할 패널 모드**: 메인 콘솔 헤더에 **⊟ 분할** 탭 추가 — 콘솔(좌)과 미니맵(우) 동시 표시. `cc_pane_<id>` localStorage 영속화. 좁은 창에서는 자동 상하 분할.
+- **Smart App Control 대응 — 번들 강화 + 포터블 + 안내(v0.26.0)**:
+  - **원인**: 무서명 + 매 버전 해시 변경(평판 0) → SAC가 설치/실행 차단. SAC는 SmartScreen과 달리 "실행" 버튼이 없어 서명이 유일한 근본 해결(사용자가 서명 없이 진행 결정).
+  - **번들 강화**(tauri.conf): `webviewInstallMode: offlineInstaller`(런타임 다운로드 휴리스틱 제거), `publisher`/`homepage`/`shortDescription`/`longDescription`/`category` 메타, NSIS `currentUser` 설치 + ko/en/ja 언어.
+  - **포터블 exe 아티팩트**: CI가 `claudecrew.exe`(무설치)를 별도 업로드 — 설치 관리자가 막힐 때 대안.
+  - **안내 문서**: `docs/SMART-APP-CONTROL.md` — SAC vs SmartScreen 차이, 허용/끄기 방법, 서명 옵션(Azure Trusted Signing/EV/OV/무료 MS 제출). 인증서는 사용자 소유물 — 우리가 만들지 않음.
 - **진짜 병렬 멀티프로세스 + 워커 실시간 가시성(v0.25.0)**:
   - **배경(Agent View 문서)**: Claude 자체 Agent View도 *"서브에이전트·팀원은 별도 행으로 나열 안 됨"* — 단일 `claude -p` 내부 Task 위임으로는 팀원 활동을 못 가져옴. 그래서 각 전문가를 **독립 프로세스**로 띄우는 방식으로 전환.
   - **`spawn_parallel` 커맨드**: 오케스트레이터가 `run_claude_capture`(plan 모드)로 작업을 JSON 분해 → 각 조각을 `spawn_worker`로 **독립 `claude -p` + 자기 worktree**에 띄움. `extract_subtasks`가 `[{title,prompt}]` 파싱(실패 시 단일 워커 폴백). 각 워커는 완전한 stream-json → 개별 활동·미니맵·상태.

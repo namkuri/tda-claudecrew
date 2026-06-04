@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "ClaudeCrew",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "identifier": "com.claudecrew.app",
   "build": {
     "frontendDist": "../ui"
@@ -25,13 +25,25 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "ClaudeCrew",
+    "homepage": "https://github.com/namkuri/tda-claudecrew",
+    "shortDescription": "누구나 쓰는 Claude 에이전트 오케스트레이션",
+    "longDescription": "Claude Code를 감싸 여러 AI 전문가를 한 화면에서 오케스트레이션하는 데스크톱 앱. 자기 worktree에서 병렬로 작업합니다.",
+    "category": "DeveloperTool",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.png",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "webviewInstallMode": { "type": "offlineInstaller" },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Korean", "English", "Japanese"]
+      }
+    }
   },
   "plugins": {}
 }
